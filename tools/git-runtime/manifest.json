@@ -1,0 +1,19 @@
+{
+  "version": "v2.53.0-3",
+  "gitVersion": "2.53.0",
+  "source": "https://github.com/desktop/dugite-native",
+  "license": "GPL-2.0",
+  "sourceCodeURL": "https://github.com/git/git/tree/v2.53.0",
+  "artifacts": {
+    "darwin-arm64": {
+      "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-3/dugite-native-v2.53.0-f49d009-macOS-arm64.tar.gz",
+      "sha256": "e561cfc80c755e6f3e938653e81efcd025c9827a5b76dd42778b1159b3fab437",
+      "filename": "dugite-native-v2.53.0-f49d009-macOS-arm64.tar.gz"
+    },
+    "darwin-amd64": {
+      "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-3/dugite-native-v2.53.0-f49d009-macOS-x64.tar.gz",
+      "sha256": "caf27c36b8834969550535bcd5e58186f970e080d1e175e76d9c1de3aac409ed",
+      "filename": "dugite-native-v2.53.0-f49d009-macOS-x64.tar.gz"
+    }
+  }
+}
