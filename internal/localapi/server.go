@@ -56,6 +56,9 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	if listen == "" {
 		listen = "127.0.0.1:0"
 	}
+	if err := assertLoopbackListen(listen); err != nil {
+		return "", err
+	}
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return "", err
@@ -119,8 +122,7 @@ func (s *Server) static() http.Handler {
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if host != "" && !strings.HasPrefix(host, "127.0.0.1") && !strings.HasPrefix(host, "localhost") {
+		if !allowedLocalHost(r.Host) {
 			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
 		}
@@ -133,6 +135,44 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func allowedLocalHost(hostport string) bool {
+	if hostport == "" {
+		return true
+	}
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	} else if strings.HasPrefix(hostport, "[") && strings.HasSuffix(hostport, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(hostport, "["), "]")
+	}
+	switch strings.ToLower(host) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func assertLoopbackListen(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("监听地址无效：%w", err)
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if !ip.IsLoopback() {
+			return fmt.Errorf("仅允许监听回环地址，收到 %s", host)
+		}
+		return nil
+	}
+	switch strings.ToLower(host) {
+	case "localhost":
+		return nil
+	default:
+		return fmt.Errorf("仅允许监听回环地址，收到 %s", host)
+	}
 }
 
 type ctxKey int

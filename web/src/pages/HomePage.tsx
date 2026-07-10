@@ -16,7 +16,7 @@ export default function HomePage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-semibold">最近项目</h1>
         <Link
-          to="/add"
+          to={{ search: "drawer=add" }}
           className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-sm font-medium active:scale-[0.98]"
         >
           <Plus size={16} />
@@ -34,7 +34,7 @@ export default function HomePage() {
             在本地目录工作，由 Forkly 记录每次变更
           </p>
           <Link
-            to="/add"
+            to={{ search: "drawer=add" }}
             className="inline-flex rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-4 py-2 text-sm font-medium"
           >
             添加现有文件夹

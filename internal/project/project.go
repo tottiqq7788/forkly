@@ -121,8 +121,19 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (ProjectView, error) 
 		if name == "" {
 			return ProjectView{}, fmt.Errorf("请填写项目名称")
 		}
+		if strings.ContainsAny(name, `/\`) || name == "." || name == ".." || strings.Contains(name, "..") {
+			return ProjectView{}, fmt.Errorf("项目名称无效")
+		}
+		if filepath.Base(name) != name {
+			return ProjectView{}, fmt.Errorf("项目名称不能包含路径")
+		}
+		parent := path
 		// Path is parent directory; create child folder.
-		path = filepath.Join(path, name)
+		path = filepath.Join(parent, name)
+		rel, err := filepath.Rel(parent, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return ProjectView{}, fmt.Errorf("项目名称无效")
+		}
 		if _, err := os.Stat(path); err == nil {
 			return ProjectView{}, fmt.Errorf("目标目录已存在，请更换名称")
 		}

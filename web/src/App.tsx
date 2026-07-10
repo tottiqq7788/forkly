@@ -1,26 +1,16 @@
-import { useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { House, Gear, FolderSimple } from "@phosphor-icons/react";
 import { api, fetchSessionMe, Project } from "./api";
 import HomePage from "./pages/HomePage";
 import ProjectPage from "./pages/ProjectPage";
-import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import AddProjectPage from "./pages/AddProjectPage";
 
-const SIDEBAR_KEY = "forkly.sidebarCollapsed";
-
 export default function App() {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      const saved = localStorage.getItem(SIDEBAR_KEY);
-      if (saved === null) return true;
-      return saved === "1";
-    } catch {
-      return true;
-    }
-  });
+  const location = useLocation();
+  const showAddDrawer =
+    location.pathname === "/add" || new URLSearchParams(location.search).get("drawer") === "add";
 
   const me = useQuery({
     queryKey: ["me"],
@@ -32,18 +22,8 @@ export default function App() {
     queryFn: () => api<{ projects: Project[] }>("/local-api/v1/projects"),
     enabled: me.isSuccess,
   });
-
-  function toggleSidebar() {
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0");
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }
+  const firstProject = projects.data?.projects[0];
+  const projectEntryPath = firstProject ? `/projects/${firstProject.id}` : "/";
 
   if (me.isError) {
     const isDev = import.meta.env.DEV;
@@ -69,47 +49,20 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      <aside
-        className={`shrink-0 border-r border-[var(--color-border)] bg-[var(--color-canvas-subtle)] flex flex-col overflow-hidden transition-[width] duration-200 ease-out ${
-          collapsed ? "w-14" : "w-[248px]"
-        }`}
-      >
-        <div
-          className={`h-12 shrink-0 flex items-center ${collapsed ? "justify-center px-0" : "px-4"}`}
-        >
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            aria-expanded={!collapsed}
-            title={collapsed ? "展开侧栏" : "收起侧栏"}
-            className="font-semibold tracking-tight text-[var(--color-text)] hover:opacity-70 transition-opacity duration-200"
-          >
-            {collapsed ? "F" : "Forkly"}
-          </button>
+      <aside className="w-20 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-canvas-subtle)] flex flex-col overflow-hidden">
+        <div className="h-12 shrink-0 flex items-center justify-center px-0">
+          <div className="whitespace-nowrap font-semibold tracking-tight text-[var(--color-text)]">Forkly</div>
         </div>
         <nav className="px-2 flex flex-col gap-0.5 flex-1 min-h-0 overflow-auto">
-          <SideLink to="/" icon={<House size={18} />} end collapsed={collapsed}>
+          <SideLink to="/" icon={<House size={18} />} end>
             首页
           </SideLink>
-          {!collapsed && (
-            <div className="px-3 pt-3 pb-1 text-[11px] uppercase tracking-wide text-[var(--color-text-tertiary)]">
-              项目
-            </div>
-          )}
-          {(projects.data?.projects || []).map((p) => (
-            <SideLink
-              key={p.id}
-              to={`/projects/${p.id}`}
-              icon={<FolderSimple size={18} />}
-              collapsed={collapsed}
-              title={p.name}
-            >
-              {p.name}
-            </SideLink>
-          ))}
+          <SideLink to={projectEntryPath} icon={<FolderSimple size={18} />} title="项目" activePrefix="/projects">
+            项目
+          </SideLink>
         </nav>
         <div className="mt-auto px-2 pb-2 pt-1">
-          <SideLink to="/settings" icon={<Gear size={18} />} collapsed={collapsed}>
+          <SideLink to="/settings" icon={<Gear size={18} />}>
             设置
           </SideLink>
         </div>
@@ -117,11 +70,12 @@ export default function App() {
       <main className="flex-1 min-w-0 overflow-auto">
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/add" element={<><HomePage /><AddProjectPage /></>} />
+          <Route path="/add" element={<HomePage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
-          <Route path="/projects/:id/history" element={<HistoryPage />} />
+          <Route path="/projects/:id/history" element={<ProjectPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
+        {showAddDrawer && <AddProjectPage />}
       </main>
     </div>
   );
@@ -132,33 +86,45 @@ function SideLink({
   children,
   icon,
   end,
-  collapsed,
   title,
+  activePrefix,
 }: {
   to: string;
   children: React.ReactNode;
   icon: React.ReactNode;
   end?: boolean;
-  collapsed?: boolean;
   title?: string;
+  activePrefix?: string;
 }) {
+  const location = useLocation();
+
   return (
     <NavLink
       to={to}
       end={end}
       title={title ?? (typeof children === "string" ? children : undefined)}
-      className={({ isActive }) =>
-        `flex items-center rounded-[var(--radius-sm)] py-2 text-sm transition-colors duration-200 ${
-          collapsed ? "justify-center px-0" : "gap-2 px-3"
-        } ${
-          isActive
-            ? "bg-[var(--color-surface-active)] text-[var(--color-text)] font-medium"
-            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-        }`
-      }
+      className={({ isActive }) => {
+        const active = isActive || (activePrefix ? location.pathname.startsWith(activePrefix) : false);
+        return `group flex items-center justify-center rounded-[var(--radius-sm)] px-3 py-2 text-sm transition-[background-color,color,box-shadow] duration-200 ${
+          active
+            ? "bg-[var(--color-surface)] text-[var(--color-text)] font-semibold shadow-[inset_3px_0_0_0_var(--color-accent)]"
+            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]/80 hover:text-[var(--color-text)]"
+        }`;
+      }}
     >
-      {icon}
-      {!collapsed && <span className="truncate">{children}</span>}
+      {({ isActive }) => (
+        <>
+          <span
+            className={`shrink-0 transition-opacity duration-200 ${
+              isActive || (activePrefix ? location.pathname.startsWith(activePrefix) : false)
+                ? "opacity-100"
+                : "opacity-70 group-hover:opacity-100"
+            }`}
+          >
+            {icon}
+          </span>
+        </>
+      )}
     </NavLink>
   );
 }

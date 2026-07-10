@@ -41,6 +41,35 @@ func TestCSRFRejected(t *testing.T) {
 	}
 }
 
+func TestForbiddenHostPrefixBypass(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr, shutdown, _, err := app.RunServerOnly(ctx, log, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	req, err := http.NewRequest(http.MethodGet, addr+"/local-api/v1/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "127.0.0.1.evil"
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for prefix-bypass host, got %d", res.StatusCode)
+	}
+}
+
 func TestCrossOriginWriteBlocked(t *testing.T) {
 	log, err := diagnostics.NewLogger()
 	if err != nil {

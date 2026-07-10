@@ -6,17 +6,22 @@ export function Drawer({
   title,
   stackIndex = 1,
   width = 520,
+  closeSignal,
   onClose,
+  onBeforeClose,
   children,
 }: {
   title: string;
   stackIndex?: number;
   width?: number;
+  closeSignal?: number;
   onClose: () => void;
+  onBeforeClose?: () => void;
   children: ReactNode;
 }) {
   const [visible, setVisible] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeSignalRef = useRef(closeSignal);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setVisible(true));
@@ -31,8 +36,17 @@ export function Drawer({
   function requestClose() {
     if (closeTimer.current) return;
     setVisible(false);
-    closeTimer.current = setTimeout(onClose, ANIMATION_MS);
+    closeTimer.current = setTimeout(() => {
+      onBeforeClose?.();
+      onClose();
+    }, ANIMATION_MS);
   }
+
+  useEffect(() => {
+    if (closeSignalRef.current === closeSignal) return;
+    closeSignalRef.current = closeSignal;
+    requestClose();
+  }, [closeSignal]);
 
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 40 + stackIndex }}>
@@ -55,7 +69,7 @@ export function Drawer({
           type="button"
           onClick={requestClose}
           className="absolute left-[-40px] w-10 rounded-l-[var(--radius-lg)] border border-r-0 border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-2.5 text-xs font-semibold leading-none shadow-[-10px_8px_24px_rgba(15,23,42,0.16)] hover:bg-[var(--color-surface-hover)]"
-          style={{ top: 16 + (stackIndex - 1) * 96 }}
+          style={{ top: 16 }}
           title={`关闭${title}`}
         >
           <span className="flex flex-col items-center gap-1.5">

@@ -1,6 +1,6 @@
 .PHONY: dev web build test e2e package-macos fetch-git clean preview-api preview-web
 
-VERSION ?= 0.1.0
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.1.0)
 ARCH ?= arm64
 APP_NAME = Forkly
 BUNDLE_ID = app.forkly.desktop

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { Drawer } from "../Drawer";
 
@@ -11,14 +11,39 @@ type InspectResult = {
   bare: boolean;
 };
 
-export default function AddProjectPage() {
+export default function AddProjectPage({
+  stackIndex = 1,
+  onClose,
+}: {
+  stackIndex?: number;
+  onClose?: () => void;
+}) {
   const [tab, setTab] = useState<"add" | "create">("add");
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [repoChoice, setRepoChoice] = useState<InspectResult | null>(null);
   const nav = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
+
+  function closeDrawer() {
+    if (onClose) {
+      onClose();
+      return;
+    }
+    if (location.pathname === "/add") {
+      nav("/", { replace: true });
+      return;
+    }
+    const params = new URLSearchParams(location.search);
+    params.delete("drawer");
+    const search = params.toString();
+    nav(
+      { pathname: location.pathname, search: search ? `?${search}` : "" },
+      { replace: true },
+    );
+  }
 
   const pick = useMutation({
     mutationFn: () => api<{ path: string }>("/local-api/v1/dialog/folder", { method: "POST", body: "{}" }),
@@ -60,6 +85,7 @@ export default function AddProjectPage() {
       }),
     onSuccess: async (p) => {
       await qc.invalidateQueries({ queryKey: ["projects"] });
+      onClose?.();
       nav(`/projects/${p.id}`);
     },
     onError: (e: Error) => setError(e.message),
@@ -82,7 +108,7 @@ export default function AddProjectPage() {
 
   return (
     <>
-      <Drawer title="添加项目" stackIndex={1} width={576} onClose={() => nav("/")}>
+      <Drawer title="添加项目" stackIndex={stackIndex} width={576} onClose={closeDrawer}>
         <div className="flex gap-2 mb-4">
           <Tab active={tab === "add"} onClick={() => setTab("add")}>
             添加现有文件夹
@@ -133,7 +159,7 @@ export default function AddProjectPage() {
           {error && <p className="text-sm text-[var(--color-error-fg)]">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => nav("/")} className="px-3 py-1.5 text-sm">
+            <button type="button" onClick={closeDrawer} className="px-3 py-1.5 text-sm">
               取消
             </button>
             <button
@@ -149,7 +175,7 @@ export default function AddProjectPage() {
       </Drawer>
 
       {repoChoice && (
-        <Drawer title="初始化" stackIndex={2} width={440} onClose={() => setRepoChoice(null)}>
+        <Drawer title="初始化" stackIndex={stackIndex + 1} width={440} onClose={() => setRepoChoice(null)}>
           <h2 className="text-lg font-semibold mb-3">已检测到 Git 仓库</h2>
           <p className="text-sm text-[var(--color-text-secondary)] mb-4">
             <span className="font-mono text-[var(--color-text)]">{repoChoice.path}</span>{" "}
