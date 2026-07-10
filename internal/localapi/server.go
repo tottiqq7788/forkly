@@ -27,14 +27,20 @@ type Deps struct {
 	Picker   platform.FolderPicker
 	Reveal   platform.RevealInFinder
 	Version  string
+	DevMode  bool
+}
+
+type StartOptions struct {
+	// Listen is a TCP address like "127.0.0.1:8787". Empty uses 127.0.0.1:0.
+	Listen string
 }
 
 type Server struct {
-	deps   Deps
-	ln     net.Listener
-	srv    *http.Server
-	addr   string
-	cop    *http.CrossOriginProtection
+	deps Deps
+	ln   net.Listener
+	srv  *http.Server
+	addr string
+	cop  *http.CrossOriginProtection
 }
 
 func New(deps Deps) *Server {
@@ -42,18 +48,32 @@ func New(deps Deps) *Server {
 }
 
 func (s *Server) Start() (string, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	return s.StartWith(StartOptions{})
+}
+
+func (s *Server) StartWith(opts StartOptions) (string, error) {
+	listen := opts.Listen
+	if listen == "" {
+		listen = "127.0.0.1:0"
+	}
+	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return "", err
 	}
 	s.ln = ln
 	s.addr = "http://" + ln.Addr().String()
 	_ = s.cop.AddTrustedOrigin(s.addr)
+	if s.deps.DevMode {
+		_ = s.cop.AddTrustedOrigin("http://127.0.0.1:5173")
+		_ = s.cop.AddTrustedOrigin("http://localhost:5173")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/local-api/v1/health", s.handleHealth)
 	mux.HandleFunc("/local-api/v1/session/claim", s.handleClaim)
+	mux.HandleFunc("/local-api/v1/session/dev-login", s.handleDevLogin)
 	mux.HandleFunc("/local-api/v1/session/me", s.auth(s.handleMe))
+	mux.HandleFunc("/local-api/v1/projects/inspect", s.authWrite(s.handleProjectInspect))
 	mux.HandleFunc("/local-api/v1/projects", s.auth(s.handleProjects))
 	mux.HandleFunc("/local-api/v1/projects/", s.auth(s.handleProjectSub))
 	mux.HandleFunc("/local-api/v1/settings", s.auth(s.handleSettings))
@@ -108,6 +128,9 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
+		if strings.HasPrefix(r.URL.Path, "/local-api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

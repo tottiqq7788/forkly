@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ClockCounterClockwise, ArrowClockwise } from "@phosphor-icons/react";
 import { api, DiffResult, FileStatus, Project, StatusSnapshot } from "../api";
+import { Drawer } from "../Drawer";
 
 export default function ProjectPage() {
   const { id = "" } = useParams();
@@ -13,6 +14,8 @@ export default function ProjectPage() {
   const [commitOpen, setCommitOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [err, setErr] = useState("");
+
+  const [refreshing, setRefreshing] = useState(false);
 
   const project = useQuery({
     queryKey: ["project", id],
@@ -28,6 +31,27 @@ export default function ProjectPage() {
     queryFn: () => api<DiffResult>(`/local-api/v1/projects/${id}/diff?path=${encodeURIComponent(activePath)}`),
     enabled: !!activePath,
   });
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    const started = Date.now();
+    try {
+      await Promise.all([
+        project.refetch(),
+        status.refetch({ cancelRefetch: false }),
+        qc.invalidateQueries({ queryKey: ["projects"] }),
+        activePath ? diff.refetch({ cancelRefetch: false }) : Promise.resolve(),
+      ]);
+    } finally {
+      // Keep spinning for at least one full rotation (1s matches animate-spin).
+      const remain = 1000 - (Date.now() - started);
+      if (remain > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remain));
+      }
+      setRefreshing(false);
+    }
+  }
 
   const files = useMemo(() => {
     const list = status.data?.files || [];
@@ -72,11 +96,12 @@ export default function ProjectPage() {
         </div>
         <button
           type="button"
-          onClick={() => status.refetch()}
-          className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-surface-hover)]"
+          onClick={() => void handleRefresh()}
+          disabled={refreshing}
+          className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-surface-hover)] disabled:opacity-60"
           title="刷新"
         >
-          <ArrowClockwise size={16} />
+          <ArrowClockwise size={16} className={refreshing ? "animate-spin" : undefined} />
         </button>
         <Link
           to={`/projects/${id}/history`}
@@ -159,8 +184,8 @@ export default function ProjectPage() {
       </div>
 
       {commitOpen && (
-        <div className="fixed inset-0 bg-black/20 flex justify-end z-50">
-          <div className="w-[420px] h-full bg-[var(--color-surface)] border-l border-[var(--color-border)] p-5 flex flex-col shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
+        <Drawer title="保存版本" stackIndex={1} width={420} onClose={() => setCommitOpen(false)}>
+          <div className="min-h-full flex flex-col">
             <h2 className="text-lg font-semibold mb-3">保存版本</h2>
             <p className="text-sm text-[var(--color-text-secondary)] mb-3">将包含 {selected.size} 个文件</p>
             <ul className="mb-4 max-h-40 overflow-auto text-sm space-y-1">
@@ -195,7 +220,7 @@ export default function ProjectPage() {
               </button>
             </div>
           </div>
-        </div>
+        </Drawer>
       )}
     </div>
   );

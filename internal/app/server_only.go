@@ -16,8 +16,19 @@ import (
 	"github.com/forkly-app/forkly/internal/session"
 )
 
-// RunServerOnly starts the local API without the menu bar (for tests / CI).
+type ServerOnlyOptions struct {
+	DataDir string
+	Listen  string
+	DevMode bool
+}
+
+// RunServerOnly starts the local API without the menu bar (for tests / CI / Vite preview).
 func RunServerOnly(ctx context.Context, log *diagnostics.Logger, dataDir string) (addr string, shutdown func(context.Context) error, openURL string, err error) {
+	return RunServerOnlyWith(ctx, log, ServerOnlyOptions{DataDir: dataDir})
+}
+
+func RunServerOnlyWith(ctx context.Context, log *diagnostics.Logger, opts ServerOnlyOptions) (addr string, shutdown func(context.Context) error, openURL string, err error) {
+	dataDir := opts.DataDir
 	if dataDir == "" {
 		dataDir, err = config.DefaultDataDir()
 		if err != nil {
@@ -38,9 +49,9 @@ func RunServerOnly(ctx context.Context, log *diagnostics.Logger, dataDir string)
 	sessions := session.NewManager(12 * time.Hour)
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
-		Sessions: sessions, Version: Version,
+		Sessions: sessions, Version: Version, DevMode: opts.DevMode,
 	})
-	addr, err = api.Start()
+	addr, err = api.StartWith(localapi.StartOptions{Listen: opts.Listen})
 	if err != nil {
 		return "", nil, "", err
 	}

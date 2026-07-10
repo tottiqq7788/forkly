@@ -1,9 +1,17 @@
-.PHONY: dev web build test e2e package-macos fetch-git clean
+.PHONY: dev web build test e2e package-macos fetch-git clean preview-api preview-web
 
 VERSION ?= 0.1.0
 ARCH ?= arm64
 APP_NAME = Forkly
 BUNDLE_ID = app.forkly.desktop
+
+# Vite UI only (needs preview-api in another terminal for real data)
+preview-web:
+	cd web && npm install && npm run dev -- --host 127.0.0.1
+
+# Local API for Vite proxy (no menu bar; fixed :8787 + dev-login)
+preview-api:
+	FORKLY_DEV=1 go run ./cmd/forkly
 
 dev: web
 	@echo "Build web done. Run: go run ./cmd/forkly"

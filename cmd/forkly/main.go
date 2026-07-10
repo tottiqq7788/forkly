@@ -22,14 +22,27 @@ func main() {
 	}
 	defer log.Close()
 
-	if os.Getenv("FORKLY_SERVER_ONLY") == "1" {
-		addr, shutdown, openURL, err := app.RunServerOnly(ctx, log, os.Getenv("FORKLY_DATA_DIR"))
+	devMode := os.Getenv("FORKLY_DEV") == "1"
+	serverOnly := os.Getenv("FORKLY_SERVER_ONLY") == "1" || devMode
+	if serverOnly {
+		listen := os.Getenv("FORKLY_LISTEN")
+		if listen == "" && devMode {
+			listen = "127.0.0.1:8787"
+		}
+		addr, shutdown, openURL, err := app.RunServerOnlyWith(ctx, log, app.ServerOnlyOptions{
+			DataDir: os.Getenv("FORKLY_DATA_DIR"),
+			Listen:  listen,
+			DevMode: devMode,
+		})
 		if err != nil {
 			log.Error("server-only failed", "err", err)
 			os.Exit(1)
 		}
 		fmt.Println(addr)
 		fmt.Println(openURL)
+		if devMode {
+			log.Info("dev mode enabled", "listen", addr, "vite", "http://127.0.0.1:5173/")
+		}
 		<-ctx.Done()
 		_ = shutdown(context.Background())
 		return

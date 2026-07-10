@@ -23,16 +23,16 @@ func NewService(store *config.Store, git *gitexec.Executor) *Service {
 }
 
 type ProjectView struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	AddedAt   time.Time `json:"addedAt"`
-	OpenedAt  time.Time `json:"openedAt"`
-	Exists    bool      `json:"exists"`
-	Branch    string    `json:"branch,omitempty"`
-	ChangeCount int     `json:"changeCount"`
-	Summary   string    `json:"summary"`
-	Blockers  []string  `json:"blockers,omitempty"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	AddedAt     time.Time `json:"addedAt"`
+	OpenedAt    time.Time `json:"openedAt"`
+	Exists      bool      `json:"exists"`
+	Branch      string    `json:"branch,omitempty"`
+	ChangeCount int       `json:"changeCount"`
+	Summary     string    `json:"summary"`
+	Blockers    []string  `json:"blockers,omitempty"`
 }
 
 func (s *Service) List(ctx context.Context) ([]ProjectView, error) {
@@ -70,10 +70,45 @@ func (s *Service) List(ctx context.Context) ([]ProjectView, error) {
 }
 
 type AddRequest struct {
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Init     bool   `json:"init"`
+	Create   bool   `json:"create"` // create new empty folder under parent? Path is target.
+	ResetGit bool   `json:"resetGit"`
+}
+
+type InspectResult struct {
 	Path   string `json:"path"`
 	Name   string `json:"name"`
-	Init   bool   `json:"init"`
-	Create bool   `json:"create"` // create new empty folder under parent? Path is target.
+	IsRepo bool   `json:"isRepo"`
+	Bare   bool   `json:"bare"`
+	Exists bool   `json:"exists"`
+	IsDir  bool   `json:"isDir"`
+}
+
+func (s *Service) Inspect(ctx context.Context, path string) (InspectResult, error) {
+	path = filepath.Clean(path)
+	if path == "" || path == "." {
+		return InspectResult{}, fmt.Errorf("路径无效")
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return InspectResult{}, fmt.Errorf("无法访问路径：%w", err)
+	}
+	if !st.IsDir() {
+		return InspectResult{}, fmt.Errorf("请选择文件夹")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = resolved
+	}
+	out := InspectResult{Path: path, Name: filepath.Base(path), Exists: true, IsDir: true}
+	if isRepo, _ := s.git.IsRepo(ctx, path); isRepo {
+		out.IsRepo = true
+		health, _ := s.git.Health(ctx, path)
+		out.Bare = health.Bare
+	}
+	return out, nil
 }
 
 func (s *Service) Add(ctx context.Context, req AddRequest) (ProjectView, error) {
@@ -115,12 +150,19 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (ProjectView, error) 
 	}
 
 	isRepo, _ := s.git.IsRepo(ctx, path)
-	if isRepo {
+	if isRepo && req.ResetGit {
+		if err := resetGitHistory(path); err != nil {
+			return ProjectView{}, err
+		}
+		if err := s.git.InitRepo(ctx, path); err != nil {
+			return ProjectView{}, fmt.Errorf("重新初始化 Git 失败：%w", err)
+		}
+	} else if isRepo {
 		health, _ := s.git.Health(ctx, path)
 		if health.Bare {
 			return ProjectView{}, fmt.Errorf("不支持 bare 仓库")
 		}
-	} else if req.Init || req.Create {
+	} else if req.Init || req.Create || req.ResetGit {
 		if err := s.git.InitRepo(ctx, path); err != nil {
 			return ProjectView{}, fmt.Errorf("初始化 Git 失败：%w", err)
 		}
@@ -142,6 +184,21 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (ProjectView, error) 
 		return ProjectView{}, err
 	}
 	return ProjectView{ID: id, Name: name, Path: path, AddedAt: now, OpenedAt: now, Exists: true, Summary: "无修改"}, nil
+}
+
+func resetGitHistory(path string) error {
+	gitDir := filepath.Join(path, ".git")
+	st, err := os.Stat(gitDir)
+	if err != nil {
+		return fmt.Errorf("无法清空 Git 历史：%w", err)
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("当前仓库使用外部 .git 文件，暂不支持清空重新提交")
+	}
+	if err := os.RemoveAll(gitDir); err != nil {
+		return fmt.Errorf("清空 Git 历史失败：%w", err)
+	}
+	return nil
 }
 
 func (s *Service) Remove(id string) error {

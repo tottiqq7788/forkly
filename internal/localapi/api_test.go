@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -183,4 +184,73 @@ func cookieFromJar(client *http.Client, base, name string) string {
 		}
 	}
 	return ""
+}
+
+func TestDevLogin(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addr, shutdown, _, err := app.RunServerOnlyWith(ctx, log, app.ServerOnlyOptions{
+		DataDir: t.TempDir(),
+		Listen:  "127.0.0.1:0",
+		DevMode: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	res, err := client.Post(addr+"/local-api/v1/session/dev-login", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("dev-login %d", res.StatusCode)
+	}
+
+	res, err = client.Get(addr + "/local-api/v1/session/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("me after dev-login %d", res.StatusCode)
+	}
+}
+
+func TestDevLoginDisabled(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addr, shutdown, _, err := app.RunServerOnly(ctx, log, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	res, err := http.Post(addr+"/local-api/v1/session/dev-login", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 404 {
+		t.Fatalf("expected 404 without DevMode, got %d", res.StatusCode)
+	}
 }

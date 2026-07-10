@@ -66,3 +66,33 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   return data as T;
 }
+
+export type SessionMe = { git: { version: string; bundled: boolean } };
+
+/** Load session; in Vite DEV, auto-bootstrap via /session/dev-login when no menu-bar claim. */
+export async function fetchSessionMe(): Promise<SessionMe> {
+  try {
+    return await api<SessionMe>("/local-api/v1/session/me");
+  } catch (first) {
+    if (!import.meta.env.DEV) {
+      throw first;
+    }
+    let res: Response;
+    try {
+      res = await fetch("/local-api/v1/session/dev-login", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } catch {
+      throw first;
+    }
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error("开发 API 未开启 DevMode，请用 FORKLY_DEV=1 启动");
+      }
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as { error?: string }).error || res.statusText || "dev-login failed");
+    }
+    return await api<SessionMe>("/local-api/v1/session/me");
+  }
+}

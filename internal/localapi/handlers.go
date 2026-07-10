@@ -37,13 +37,34 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusFound)
 }
 
+// handleDevLogin creates a local session without the menu-bar one-time link.
+// It is only available when the server runs with DevMode=true.
+func (s *Server) handleDevLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.deps.DevMode {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if existing, ok := s.deps.Sessions.FromRequest(r); ok {
+		s.deps.Sessions.SetCookies(w, existing)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "csrf": existing.CSRF, "dev": true})
+		return
+	}
+	sess := s.deps.Sessions.Create()
+	s.deps.Sessions.SetCookies(w, sess)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "csrf": sess.CSRF, "dev": true})
+}
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	sess := r.Context().Value(sessionKey)
 	snap := s.deps.Store.Snapshot()
 	rt := s.deps.Git.Runtime()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session": sess,
-		"identity": snap.Identity,
+		"session":     sess,
+		"identity":    snap.Identity,
 		"preferences": snap.Preferences,
 		"git": map[string]any{
 			"version": rt.Version,
@@ -79,6 +100,26 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Server) handleProjectInspect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求无效")
+		return
+	}
+	info, err := s.deps.Projects.Inspect(r.Context(), body.Path)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
