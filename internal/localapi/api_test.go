@@ -254,3 +254,163 @@ func TestDevLoginDisabled(t *testing.T) {
 		t.Fatalf("expected 404 without DevMode, got %d", res.StatusCode)
 	}
 }
+
+func TestDashboardActivity(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	dataDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+
+	// Unauthenticated should fail.
+	res, err := http.Get(base + "/local-api/v1/dashboard/activity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("unauth status %d", res.StatusCode)
+	}
+
+	csrf := readCSRF(client, base)
+
+	// Create a project then delete its directory to simulate unavailable.
+	parent := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"path": parent, "name": "will-delete", "create": true, "init": true})
+	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 201 {
+		var errBody map[string]string
+		_ = json.NewDecoder(res.Body).Decode(&errBody)
+		res.Body.Close()
+		t.Fatalf("add missing-bound project %d %v", res.StatusCode, errBody)
+	}
+	res.Body.Close()
+	_ = os.RemoveAll(filepath.Join(parent, "will-delete"))
+
+	repo := t.TempDir()
+	body, _ = json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 201 {
+		var errBody map[string]string
+		_ = json.NewDecoder(res.Body).Decode(&errBody)
+		t.Fatalf("add project %d %v", res.StatusCode, errBody)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	id, _ := proj["id"].(string)
+
+	os.WriteFile(filepath.Join(repo, "hello.txt"), []byte("hi\n"), 0o644)
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Files       []map[string]any `json:"files"`
+		Fingerprint string           `json:"fingerprint"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&st)
+	res.Body.Close()
+
+	commitBody, _ := json.Marshal(map[string]any{
+		"paths":       []string{"hello.txt"},
+		"message":     "add hello",
+		"fingerprint": st.Fingerprint,
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/commit", bytes.NewReader(commitBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("commit %d", res.StatusCode)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/dashboard/activity?days=30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("dashboard %d", res.StatusCode)
+	}
+	var dash struct {
+		Days          int `json:"days"`
+		TotalCommits  int `json:"totalCommits"`
+		RecentCommits int `json:"recentCommits"`
+		Series        []struct {
+			Date  string `json:"date"`
+			Count int    `json:"count"`
+		} `json:"series"`
+		ScannedProjects int `json:"scannedProjects"`
+		Unavailable     int `json:"unavailable"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&dash); err != nil {
+		t.Fatal(err)
+	}
+	if dash.Days != 30 {
+		t.Fatalf("days=%d", dash.Days)
+	}
+	if len(dash.Series) != 30 {
+		t.Fatalf("series len=%d", len(dash.Series))
+	}
+	if dash.TotalCommits < 1 || dash.RecentCommits < 1 {
+		t.Fatalf("commits total=%d recent=%d", dash.TotalCommits, dash.RecentCommits)
+	}
+	if dash.Unavailable < 1 {
+		t.Fatalf("expected unavailable >= 1, got %d", dash.Unavailable)
+	}
+	today := time.Now().Format("2006-01-02")
+	foundToday := false
+	for _, d := range dash.Series {
+		if d.Date == today && d.Count >= 1 {
+			foundToday = true
+		}
+	}
+	if !foundToday {
+		t.Fatalf("today %s missing or zero in series %#v", today, dash.Series[len(dash.Series)-3:])
+	}
+
+	// Also verify kindCounts on projects list.
+	res, err = client.Get(base + "/local-api/v1/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var list struct {
+		Projects []map[string]any `json:"projects"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&list)
+	if len(list.Projects) < 1 {
+		t.Fatal("expected projects")
+	}
+}

@@ -17,7 +17,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.4"
+var Version = "0.1.5"
 
 func Run(ctx context.Context, log *diagnostics.Logger) error {
 	dataDir, err := config.DefaultDataDir()

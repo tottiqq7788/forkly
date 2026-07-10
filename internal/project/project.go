@@ -23,16 +23,17 @@ func NewService(store *config.Store, git *gitexec.Executor) *Service {
 }
 
 type ProjectView struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Path        string    `json:"path"`
-	AddedAt     time.Time `json:"addedAt"`
-	OpenedAt    time.Time `json:"openedAt"`
-	Exists      bool      `json:"exists"`
-	Branch      string    `json:"branch,omitempty"`
-	ChangeCount int       `json:"changeCount"`
-	Summary     string    `json:"summary"`
-	Blockers    []string  `json:"blockers,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Path        string         `json:"path"`
+	AddedAt     time.Time      `json:"addedAt"`
+	OpenedAt    time.Time      `json:"openedAt"`
+	Exists      bool           `json:"exists"`
+	Branch      string         `json:"branch,omitempty"`
+	ChangeCount int            `json:"changeCount"`
+	Summary     string         `json:"summary"`
+	Blockers    []string       `json:"blockers,omitempty"`
+	KindCounts  map[string]int `json:"kindCounts,omitempty"`
 }
 
 func (s *Service) List(ctx context.Context) ([]ProjectView, error) {
@@ -58,6 +59,7 @@ func (s *Service) List(ctx context.Context) ([]ProjectView, error) {
 			v.Branch = st.Health.Branch
 			v.ChangeCount = len(st.Files)
 			v.Blockers = st.Health.Blockers
+			v.KindCounts = countKinds(st.Files)
 			if len(st.Files) == 0 {
 				v.Summary = "无修改"
 			} else {
@@ -283,4 +285,15 @@ func samePath(a, b string) bool {
 		b = rb
 	}
 	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func countKinds(files []gitexec.FileStatus) map[string]int {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make(map[string]int, 8)
+	for _, f := range files {
+		out[string(f.Kind)]++
+	}
+	return out
 }

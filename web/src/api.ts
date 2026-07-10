@@ -9,6 +9,16 @@ export type Project = {
   changeCount: number;
   summary: string;
   blockers?: string[];
+  kindCounts?: Record<string, number>;
+};
+
+export type DashboardActivity = {
+  days: number;
+  totalCommits: number;
+  recentCommits: number;
+  series: { date: string; count: number }[];
+  scannedProjects: number;
+  unavailable: number;
 };
 
 export type FileStatus = {

@@ -78,6 +78,7 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	mux.HandleFunc("/local-api/v1/session/claim", s.handleClaim)
 	mux.HandleFunc("/local-api/v1/session/dev-login", s.handleDevLogin)
 	mux.HandleFunc("/local-api/v1/session/me", s.auth(s.handleMe))
+	mux.HandleFunc("/local-api/v1/dashboard/activity", s.auth(s.handleDashboardActivity))
 	mux.HandleFunc("/local-api/v1/projects/inspect", s.authWrite(s.handleProjectInspect))
 	mux.HandleFunc("/local-api/v1/projects", s.auth(s.handleProjects))
 	mux.HandleFunc("/local-api/v1/projects/", s.auth(s.handleProjectSub))
