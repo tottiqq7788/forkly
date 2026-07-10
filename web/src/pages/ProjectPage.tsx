@@ -217,13 +217,15 @@ export default function ProjectPage() {
                   key={k}
                   type="button"
                   onClick={() => setFilter(k)}
-                  className={`text-xs px-2 py-1 rounded-full ${
+                  className={`relative inline-flex items-center justify-center text-xs h-6 rounded-full ${
+                    k === "renamed" ? "w-[52px]" : "w-10"
+                  } ${
                     filter === k ? "bg-[var(--color-surface-active)] font-medium" : "text-[var(--color-text-secondary)]"
                   }`}
                 >
                   {labelFilter(k)}
                   {(fileCounts[k] || 0) > 0 && (
-                    <sup className="ml-0.5 text-[9px] font-normal text-[var(--color-text-tertiary)] leading-none">
+                    <sup className="pointer-events-none absolute -right-0.5 -top-0.5 text-[9px] font-normal text-[var(--color-text-tertiary)] leading-none">
                       {fileCounts[k]}
                     </sup>
                   )}
@@ -416,6 +418,20 @@ function ProjectTabButton({
   );
 }
 
+type HistoryTreeNode =
+  | {
+      kind: "group";
+      key: string;
+      label: string;
+      children: HistoryTreeNode[];
+    }
+  | {
+      kind: "commit";
+      key: string;
+      commit: Commit;
+      timeLabel: string;
+    };
+
 function ProjectHistoryPanel({ projectID }: { projectID: string }) {
   const [selected, setSelected] = useState("");
   useEffect(() => {
@@ -433,31 +449,30 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
   });
 
   const commits = history.data?.commits || [];
+  const historyTree = useMemo(() => buildHistoryTree(commits), [commits]);
 
   return (
     <div className="flex flex-1 min-h-0">
-      <ul className="w-[320px] border-r border-[var(--color-border)] overflow-auto">
-        {history.isLoading && <li className="p-4 text-sm text-[var(--color-text-secondary)]">加载历史…</li>}
+      <div className="w-[320px] border-r border-[var(--color-border)] overflow-auto py-1">
+        {history.isLoading && <p className="p-4 text-sm text-[var(--color-text-secondary)]">加载历史…</p>}
         {!history.isLoading && commits.length === 0 && (
-          <li className="p-4 text-sm text-[var(--color-text-secondary)]">还没有任何版本</li>
+          <p className="p-4 text-sm text-[var(--color-text-secondary)]">还没有任何版本</p>
         )}
-        {commits.map((c) => (
-          <li key={c.sha}>
-            <button
-              type="button"
-              onClick={() => setSelected(c.sha)}
-              className={`w-full text-left px-4 py-3 border-b border-[var(--color-border)] ${
-                selected === c.sha ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
-              }`}
-            >
-              <div className="truncate font-medium text-sm">{c.subject}</div>
-              <div className="text-[11px] text-[var(--color-text-secondary)] mt-1">
-                {c.author} · {formatDate(c.date)} · <span className="font-mono">{c.short}</span>
-              </div>
-            </button>
-          </li>
-        ))}
-      </ul>
+        {!history.isLoading && commits.length > 0 && (
+          <div className="px-2">
+            {historyTree.map((node, index) => (
+              <HistoryTreeNodeRow
+                key={node.key}
+                node={node}
+                isLast={index === historyTree.length - 1}
+                ancestorContinues={[]}
+                selected={selected}
+                onSelect={setSelected}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex-1 p-5 overflow-auto">
         {!selected && <p className="text-[var(--color-text-secondary)]">选择一次提交查看详情</p>}
         {detail.isLoading && <p className="text-[var(--color-text-secondary)]">加载提交详情…</p>}
@@ -487,6 +502,134 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function buildHistoryTree(commits: Commit[]): HistoryTreeNode[] {
+  type MutableGroup = {
+    key: string;
+    label: string;
+    children: Map<string, MutableGroup>;
+    commits: HistoryTreeNode[];
+    order: string[];
+  };
+
+  const root: MutableGroup = { key: "root", label: "", children: new Map(), commits: [], order: [] };
+
+  function ensureGroup(parent: MutableGroup, key: string, label: string): MutableGroup {
+    let group = parent.children.get(key);
+    if (!group) {
+      group = { key, label, children: new Map(), commits: [], order: [] };
+      parent.children.set(key, group);
+      parent.order.push(key);
+    }
+    return group;
+  }
+
+  for (const commit of commits) {
+    const parts = historyDateParts(commit.date);
+    const year = ensureGroup(root, `y:${parts.year}`, parts.year);
+    const month = ensureGroup(year, `m:${parts.year}-${parts.month}`, parts.month);
+    const day = ensureGroup(month, `d:${parts.year}-${parts.month}-${parts.day}`, parts.day);
+    const authorKey = commit.author || "未知身份";
+    const author = ensureGroup(day, `a:${parts.year}-${parts.month}-${parts.day}:${authorKey}`, authorKey);
+    author.commits.push({
+      kind: "commit",
+      key: `c:${commit.sha}`,
+      commit,
+      timeLabel: parts.time,
+    });
+  }
+
+  function toArray(group: MutableGroup): HistoryTreeNode[] {
+    const groups = group.order.map((key) => {
+      const child = group.children.get(key)!;
+      return {
+        kind: "group" as const,
+        key: child.key,
+        label: child.label,
+        children: toArray(child),
+      };
+    });
+    return [...groups, ...group.commits];
+  }
+
+  return toArray(root);
+}
+
+function historyDateParts(iso: string): { year: string; month: string; day: string; time: string } {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    return { year: "未知日期", month: "未知", day: "未知", time: "--:--:--" };
+  }
+  const year = String(d.getFullYear());
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const time = [
+    String(d.getHours()).padStart(2, "0"),
+    String(d.getMinutes()).padStart(2, "0"),
+    String(d.getSeconds()).padStart(2, "0"),
+  ].join(":");
+  return { year, month, day, time };
+}
+
+function HistoryTreeNodeRow({
+  node,
+  isLast,
+  ancestorContinues,
+  selected,
+  onSelect,
+}: {
+  node: HistoryTreeNode;
+  isLast: boolean;
+  ancestorContinues: boolean[];
+  selected: string;
+  onSelect: (sha: string) => void;
+}) {
+  if (node.kind === "group") {
+    return (
+      <div>
+        <div className="flex items-stretch gap-1 px-1 text-xs text-[var(--color-text-secondary)]">
+          <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
+          <div className="flex min-w-0 flex-1 items-center py-0.5">
+            <span className="min-w-0 flex-1 truncate font-medium" title={node.label}>
+              {node.label}
+            </span>
+          </div>
+        </div>
+        {node.children.map((child, index) => (
+          <HistoryTreeNodeRow
+            key={child.key}
+            node={child}
+            isLast={index === node.children.length - 1}
+            ancestorContinues={[...ancestorContinues, !isLast]}
+            selected={selected}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const active = selected === node.commit.sha;
+  return (
+    <div
+      className={`flex items-stretch gap-1 px-1 rounded-[var(--radius-sm)] ${
+        active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
+      }`}
+    >
+      <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
+      <button
+        type="button"
+        className="min-w-0 flex-1 text-left py-0.5 cursor-pointer"
+        onClick={() => onSelect(node.commit.sha)}
+      >
+        <div className="truncate text-xs font-medium" title={node.commit.subject}>
+          {node.commit.subject || "（无说明）"}
+        </div>
+        <div className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">{node.timeLabel}</div>
+      </button>
     </div>
   );
 }
