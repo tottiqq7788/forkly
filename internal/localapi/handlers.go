@@ -95,6 +95,9 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
+			if s.deps.Watcher != nil {
+				_ = s.deps.Watcher.Watch(p.ID, p.Path)
+			}
 			writeJSON(w, http.StatusCreated, p)
 		})(w, r)
 	default:
@@ -138,6 +141,9 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 					writeErr(w, http.StatusBadRequest, err.Error())
 					return
 				}
+				if s.deps.Watcher != nil {
+					s.deps.Watcher.Unwatch(id)
+				}
 				writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 			})(w, r)
 		case http.MethodGet:
@@ -165,6 +171,24 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if s.deps.Watcher != nil {
+			observed := s.deps.Watcher.ObservedRenames(id)
+			pairs := make([]gitexec.RenamePair, 0, len(observed))
+			for _, o := range observed {
+				pairs = append(pairs, gitexec.RenamePair{Old: o.Old, New: o.New})
+			}
+			merged, used := gitexec.CoalesceObservedRenames(st.Files, pairs)
+			usedKey := make(map[string]bool, len(used))
+			for _, u := range used {
+				usedKey[u.Old+"\x00"+u.New] = true
+			}
+			for _, o := range observed {
+				if !usedKey[o.Old+"\x00"+o.New] {
+					s.deps.Watcher.Forget(id, o.Old, o.New)
+				}
+			}
+			st.Files = merged
 		}
 		writeJSON(w, http.StatusOK, st)
 	case "diff":

@@ -17,7 +17,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.1"
+var Version = "0.1.2"
 
 func Run(ctx context.Context, log *diagnostics.Logger) error {
 	dataDir, err := config.DefaultDataDir()
@@ -65,7 +65,7 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
-		Sessions: sessions, Picker: picker, Reveal: reveal, Version: Version,
+		Sessions: sessions, Picker: picker, Reveal: reveal, Watcher: wm, Version: Version,
 	})
 	addr, err := api.Start()
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
+	"github.com/forkly-app/forkly/internal/watcher"
 	"github.com/forkly-app/forkly/internal/webui"
 )
 
@@ -26,6 +27,7 @@ type Deps struct {
 	Sessions *session.Manager
 	Picker   platform.FolderPicker
 	Reveal   platform.RevealInFinder
+	Watcher  *watcher.Manager
 	Version  string
 	DevMode  bool
 }

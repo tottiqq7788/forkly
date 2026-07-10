@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowClockwise, FolderSimple, Plus } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowsLeftRight, FolderSimple, Minus, PencilSimple, Plus, WarningCircle } from "@phosphor-icons/react";
 import { api, DiffResult, FileStatus, Project, StatusSnapshot } from "../api";
 import { Drawer } from "../Drawer";
 import AddProjectPage from "./AddProjectPage";
@@ -108,8 +108,9 @@ export default function ProjectPage() {
     return list.filter((f) => f.kind === filter);
   }, [status.data, filter]);
   const fileCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: status.data?.files.length || 0 };
-    for (const file of status.data?.files || []) {
+    const list = status.data?.files ?? [];
+    const counts: Record<string, number> = { all: list.length };
+    for (const file of list) {
       counts[file.kind] = (counts[file.kind] || 0) + 1;
     }
     return counts;
@@ -120,20 +121,31 @@ export default function ProjectPage() {
   );
 
   const commit = useMutation({
-    mutationFn: () =>
-      api(`/local-api/v1/projects/${id}/commit`, {
+    mutationFn: () => {
+      const paths = new Set<string>();
+      for (const path of selected) {
+        paths.add(path);
+        const file = (status.data?.files ?? []).find((f) => f.path === path);
+        if (file?.kind === "renamed" && file.oldPath) {
+          paths.add(file.oldPath);
+        }
+      }
+      return api(`/local-api/v1/projects/${id}/commit`, {
         method: "POST",
         body: JSON.stringify({
-          paths: [...selected],
+          paths: [...paths],
           message,
           fingerprint: status.data?.fingerprint,
         }),
-      }),
+      });
+    },
     onSuccess: async () => {
       setCommitOpen(false);
       setMessage("");
       setSelected(new Set());
+      setActivePath("");
       await qc.invalidateQueries({ queryKey: ["status", id] });
+      await qc.invalidateQueries({ queryKey: ["history", id] });
       await qc.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: (e: Error) => setErr(e.message),
@@ -205,15 +217,15 @@ export default function ProjectPage() {
                   key={k}
                   type="button"
                   onClick={() => setFilter(k)}
-                  className={`relative text-xs px-2 py-1 rounded-full ${
+                  className={`text-xs px-2 py-1 rounded-full ${
                     filter === k ? "bg-[var(--color-surface-active)] font-medium" : "text-[var(--color-text-secondary)]"
                   }`}
                 >
                   {labelFilter(k)}
                   {(fileCounts[k] || 0) > 0 && (
-                    <span className="absolute -right-1 -top-1 min-w-4 h-4 rounded-full bg-[var(--color-error-fg)] px-1 text-[10px] leading-4 text-white text-center font-medium">
+                    <sup className="ml-0.5 text-[9px] font-normal text-[var(--color-text-tertiary)] leading-none">
                       {fileCounts[k]}
-                    </span>
+                    </sup>
                   )}
                 </button>
               ))}
@@ -238,10 +250,14 @@ export default function ProjectPage() {
                   nodes={changeTree}
                   selected={selected}
                   activePath={activePath}
-                  onToggle={(path) => {
+                  onTogglePaths={(paths) => {
                     const next = new Set(selected);
-                    if (next.has(path)) next.delete(path);
-                    else next.add(path);
+                    const allOn = paths.length > 0 && paths.every((p) => next.has(p));
+                    if (allOn) {
+                      for (const p of paths) next.delete(p);
+                    } else {
+                      for (const p of paths) next.add(p);
+                    }
                     setSelected(next);
                   }}
                   onOpen={setActivePath}
@@ -592,38 +608,120 @@ function sortChangeNodes(nodes: ChangeTreeNode[]): ChangeTreeNode[] {
   });
 }
 
-const TREE_INDENT_STEP = 8;
-const TREE_INDENT_MAX = 24;
+const TREE_GUIDE_WIDTH = 16;
+
+function collectFilePaths(node: ChangeTreeNode): string[] {
+  if (node.kind === "file" && node.file) return [node.file.path];
+  return node.children.flatMap(collectFilePaths);
+}
+
+function collectAllFilePaths(nodes: ChangeTreeNode[]): string[] {
+  return nodes.flatMap(collectFilePaths);
+}
+
+function selectionState(paths: string[], selected: Set<string>): { checked: boolean; indeterminate: boolean } {
+  if (paths.length === 0) return { checked: false, indeterminate: false };
+  const n = paths.filter((p) => selected.has(p)).length;
+  return { checked: n === paths.length, indeterminate: n > 0 && n < paths.length };
+}
+
+function HoverSelectCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <input
+      type="checkbox"
+      aria-label={label}
+      ref={(el) => {
+        if (el) el.indeterminate = !!indeterminate;
+      }}
+      className={`shrink-0 cursor-pointer accent-[var(--color-accent)] ${
+        checked || indeterminate ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+      }`}
+      checked={checked}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+function TreeBranchGuides({
+  isLast,
+  ancestorContinues,
+}: {
+  isLast: boolean;
+  ancestorContinues: boolean[];
+}) {
+  const line = "bg-[var(--color-border-strong)]";
+  return (
+    <span className="flex shrink-0 self-stretch" aria-hidden>
+      {ancestorContinues.map((cont, i) => (
+        <span key={i} className="relative" style={{ width: TREE_GUIDE_WIDTH }}>
+          {cont && (
+            <span className={`absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2 ${line}`} />
+          )}
+        </span>
+      ))}
+      <span className="relative" style={{ width: TREE_GUIDE_WIDTH }}>
+        <span
+          className={`absolute left-1/2 top-0 w-px -translate-x-1/2 ${line} ${
+            isLast ? "h-1/2" : "bottom-0"
+          }`}
+        />
+        <span className={`absolute left-1/2 top-1/2 right-0.5 h-px ${line}`} />
+      </span>
+    </span>
+  );
+}
 
 function ChangeTreeView({
   rootName,
   nodes,
   selected,
   activePath,
-  onToggle,
+  onTogglePaths,
   onOpen,
 }: {
   rootName: string;
   nodes: ChangeTreeNode[];
   selected: Set<string>;
   activePath: string;
-  onToggle: (path: string) => void;
+  onTogglePaths: (paths: string[]) => void;
   onOpen: (path: string) => void;
 }) {
+  const allPaths = collectAllFilePaths(nodes);
+  const rootSel = selectionState(allPaths, selected);
+
   return (
     <div className="px-2">
-      <div className="px-1 py-1 text-xs font-medium text-[var(--color-text-secondary)] truncate" title={rootName}>
-        {rootName}/
+      <div className="group flex items-center gap-1 px-1 py-1 text-xs font-medium text-[var(--color-text-secondary)]">
+        <span className="min-w-0 flex-1 truncate" title={rootName}>
+          {rootName}/
+        </span>
+        <HoverSelectCheckbox
+          checked={rootSel.checked}
+          indeterminate={rootSel.indeterminate}
+          label={`选择 ${rootName} 下全部文件`}
+          onChange={() => onTogglePaths(allPaths)}
+        />
       </div>
       {nodes.map((node, index) => (
         <ChangeTreeNodeRow
           key={`${node.kind}:${node.path}`}
           node={node}
-          depth={0}
           isLast={index === nodes.length - 1}
+          ancestorContinues={[]}
           selected={selected}
           activePath={activePath}
-          onToggle={onToggle}
+          onTogglePaths={onTogglePaths}
           onOpen={onOpen}
         />
       ))}
@@ -633,47 +731,49 @@ function ChangeTreeView({
 
 function ChangeTreeNodeRow({
   node,
-  depth,
   isLast,
+  ancestorContinues,
   selected,
   activePath,
-  onToggle,
+  onTogglePaths,
   onOpen,
 }: {
   node: ChangeTreeNode;
-  depth: number;
   isLast: boolean;
+  ancestorContinues: boolean[];
   selected: Set<string>;
   activePath: string;
-  onToggle: (path: string) => void;
+  onTogglePaths: (paths: string[]) => void;
   onOpen: (path: string) => void;
 }) {
-  const indent = Math.min(depth * TREE_INDENT_STEP, TREE_INDENT_MAX);
-  const connector = isLast ? "└─" : "├─";
-
   if (node.kind === "dir") {
+    const paths = collectFilePaths(node);
+    const dirSel = selectionState(paths, selected);
     return (
       <div>
-        <div
-          className="flex items-center gap-1 px-1 py-0.5 text-xs text-[var(--color-text-secondary)]"
-          style={{ paddingLeft: 4 + indent }}
-        >
-          <span className="font-mono text-[10px] text-[var(--color-text-tertiary)] shrink-0 w-4 text-center">
-            {connector}
-          </span>
-          <span className="truncate font-mono" title={`${node.path}/`}>
-            {node.name}/
-          </span>
+        <div className="group flex items-stretch gap-1 px-1 text-xs text-[var(--color-text-secondary)]">
+          <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
+          <div className="flex min-w-0 flex-1 items-center gap-1 py-0.5">
+            <span className="min-w-0 flex-1 truncate font-mono" title={`${node.path}/`}>
+              {node.name}/
+            </span>
+            <HoverSelectCheckbox
+              checked={dirSel.checked}
+              indeterminate={dirSel.indeterminate}
+              label={`选择 ${node.name}/ 下全部文件`}
+              onChange={() => onTogglePaths(paths)}
+            />
+          </div>
         </div>
         {node.children.map((child, index) => (
           <ChangeTreeNodeRow
             key={`${child.kind}:${child.path}`}
             node={child}
-            depth={depth + 1}
             isLast={index === node.children.length - 1}
+            ancestorContinues={[...ancestorContinues, !isLast]}
             selected={selected}
             activePath={activePath}
-            onToggle={onToggle}
+            onTogglePaths={onTogglePaths}
             onOpen={onOpen}
           />
         ))}
@@ -684,37 +784,57 @@ function ChangeTreeNodeRow({
   const file = node.file!;
   const active = activePath === file.path;
   const oldName = file.oldPath ? file.oldPath.split("/").pop() : undefined;
+  const checked = selected.has(file.path);
 
   return (
     <div
-      className={`flex items-start gap-1 px-1 py-0.5 rounded-[var(--radius-sm)] ${
+      className={`group flex items-stretch gap-1 px-1 rounded-[var(--radius-sm)] ${
         active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
       }`}
-      style={{ paddingLeft: 4 + indent }}
     >
-      <span className="font-mono text-[10px] text-[var(--color-text-tertiary)] shrink-0 w-4 text-center leading-5">
-        {connector}
-      </span>
-      <input
-        type="checkbox"
-        className="mt-1 shrink-0"
-        checked={selected.has(file.path)}
-        onChange={() => onToggle(file.path)}
-        onClick={(e) => e.stopPropagation()}
-      />
-      <button type="button" className="min-w-0 flex-1 text-left cursor-pointer" onClick={() => onOpen(file.path)}>
-        <div className="truncate text-sm font-mono" title={file.path}>
-          {node.name}
-        </div>
-        {file.kind === "renamed" && oldName && (
-          <div className="truncate text-[11px] text-[var(--color-text-tertiary)]">
-            {oldName} → {node.name}
+      <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
+      <div className="flex min-w-0 flex-1 items-center gap-1 py-0.5">
+        <button type="button" className="min-w-0 flex-1 text-left cursor-pointer" onClick={() => onOpen(file.path)}>
+          <div className="flex items-center gap-1 min-w-0">
+            <KindIcon kind={file.kind} />
+            <div className="truncate text-xs font-mono" title={`${kindLabel(file.kind)} · ${file.path}`}>
+              {node.name}
+            </div>
           </div>
-        )}
-      </button>
-      <span className="shrink-0 text-[11px] text-[var(--color-text-secondary)] leading-5">{kindLabel(file.kind)}</span>
+          {file.kind === "renamed" && oldName && (
+            <div className="truncate text-[11px] text-[var(--color-text-tertiary)] pl-[14px]">
+              {oldName} → {node.name}
+            </div>
+          )}
+        </button>
+        <HoverSelectCheckbox
+          checked={checked}
+          label={`选择 ${node.name}`}
+          onChange={() => onTogglePaths([file.path])}
+        />
+      </div>
     </div>
   );
+}
+
+function KindIcon({ kind }: { kind: string }) {
+  const cls = "shrink-0";
+  const size = 12;
+  switch (kind) {
+    case "modified":
+      return <PencilSimple className={`${cls} text-[var(--color-warning-fg)]`} size={size} weight="bold" aria-hidden />;
+    case "untracked":
+    case "added":
+      return <Plus className={`${cls} text-[var(--color-success-fg)]`} size={size} weight="bold" aria-hidden />;
+    case "deleted":
+      return <Minus className={`${cls} text-[var(--color-error-fg)]`} size={size} weight="bold" aria-hidden />;
+    case "renamed":
+      return <ArrowsLeftRight className={`${cls} text-[var(--color-accent-muted)]`} size={size} weight="bold" aria-hidden />;
+    case "conflicted":
+      return <WarningCircle className={`${cls} text-[var(--color-error-fg)]`} size={size} weight="bold" aria-hidden />;
+    default:
+      return <span className="shrink-0 w-3" aria-hidden />;
+  }
 }
 
 function kindLabel(k: string) {

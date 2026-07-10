@@ -141,7 +141,7 @@ func fileExists(p string) bool {
 
 func parsePorcelainV2(data []byte) []FileStatus {
 	parts := bytes.Split(data, []byte{0})
-	var out []FileStatus
+	out := make([]FileStatus, 0)
 	for _, p := range parts {
 		if len(p) == 0 {
 			continue

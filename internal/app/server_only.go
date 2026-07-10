@@ -14,6 +14,7 @@ import (
 	"github.com/forkly-app/forkly/internal/localapi"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
+	"github.com/forkly-app/forkly/internal/watcher"
 )
 
 type ServerOnlyOptions struct {
@@ -47,15 +48,25 @@ func RunServerOnlyWith(ctx context.Context, log *diagnostics.Logger, opts Server
 	git := gitexec.NewExecutor(rt)
 	projects := project.NewService(store, git)
 	sessions := session.NewManager(12 * time.Hour)
+	wm := watcher.New(nil)
+	for _, p := range store.Snapshot().Projects {
+		_ = wm.Watch(p.ID, p.Path)
+	}
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
-		Sessions: sessions, Version: Version, DevMode: opts.DevMode,
+		Sessions: sessions, Watcher: wm, Version: Version, DevMode: opts.DevMode,
 	})
 	addr, err = api.StartWith(localapi.StartOptions{Listen: opts.Listen})
 	if err != nil {
+		wm.Close()
 		return "", nil, "", err
 	}
-	return addr, api.Shutdown, api.OpenConsoleURL(), nil
+	baseShutdown := api.Shutdown
+	return addr, func(c context.Context) error {
+		err := baseShutdown(c)
+		wm.Close()
+		return err
+	}, api.OpenConsoleURL(), nil
 }
 
 // ClaimClient follows the one-time console URL and returns an HTTP client with session cookies.
