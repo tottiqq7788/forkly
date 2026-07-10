@@ -186,7 +186,7 @@ export default function ProjectPage() {
             </button>
           </div>
           <div className="text-[11px] text-[var(--color-text-secondary)]">
-            当前分支 {health?.branch || "…"} · {(status.data?.files || []).length} 个修改
+            当前分支：{health?.branch || "…"}
           </div>
         </div>
         <div className="ml-auto flex rounded-[var(--radius-sm)] bg-[var(--color-canvas-subtle)] p-0.5">
@@ -287,7 +287,6 @@ export default function ProjectPage() {
       {commitOpen && (
         <Drawer title="保存版本" stackIndex={1} width={420} onClose={() => setCommitOpen(false)}>
           <div className="min-h-full flex flex-col">
-            <h2 className="text-lg font-semibold mb-3">保存版本</h2>
             <p className="text-sm text-[var(--color-text-secondary)] mb-3">将包含 {selected.size} 个文件</p>
             <ul className="mb-4 max-h-40 overflow-auto text-sm space-y-1">
               {[...selected].map((p) => (
@@ -453,7 +452,7 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
 
   return (
     <div className="flex flex-1 min-h-0">
-      <div className="w-[320px] border-r border-[var(--color-border)] overflow-auto py-1">
+      <div className="w-[240px] border-r border-[var(--color-border)] overflow-auto py-1">
         {history.isLoading && <p className="p-4 text-sm text-[var(--color-text-secondary)]">加载历史…</p>}
         {!history.isLoading && commits.length === 0 && (
           <p className="p-4 text-sm text-[var(--color-text-secondary)]">还没有任何版本</p>

@@ -35,6 +35,16 @@ func (e *Executor) Log(ctx context.Context, repo string, limit int, cursor strin
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	if cursor != "" {
+		if err := assertObjectID(cursor); err != nil {
+			return HistoryPage{}, err
+		}
+	}
+	if pathFilter != "" {
+		if err := assertInsideRepo(repo, pathFilter); err != nil {
+			return HistoryPage{}, err
+		}
+	}
 	args := []string{
 		"log",
 		"--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00",
@@ -96,6 +106,9 @@ func parseLog(data []byte) []CommitSummary {
 }
 
 func (e *Executor) CommitDetail(ctx context.Context, repo, sha string) (CommitSummary, []CommitFile, error) {
+	if err := assertObjectID(sha); err != nil {
+		return CommitSummary{}, nil, err
+	}
 	res, err := e.Run(ctx, RunOpts{
 		Repo: repo,
 		Args: []string{"show", "-s", "--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00", sha},
@@ -182,6 +195,9 @@ func parseNameStatusNumstat(data []byte) []CommitFile {
 }
 
 func (e *Executor) DiffCommitFile(ctx context.Context, repo, sha, path string) (DiffResult, error) {
+	if err := assertObjectID(sha); err != nil {
+		return DiffResult{}, err
+	}
 	if err := assertInsideRepo(repo, path); err != nil {
 		return DiffResult{}, err
 	}

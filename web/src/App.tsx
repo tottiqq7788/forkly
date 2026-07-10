@@ -53,11 +53,11 @@ export default function App() {
         <div className="h-12 shrink-0 flex items-center justify-center px-0">
           <div className="whitespace-nowrap font-semibold tracking-tight text-[var(--color-text)]">Forkly</div>
         </div>
-        <nav className="px-2 flex flex-col gap-0.5 flex-1 min-h-0 overflow-auto">
+        <nav className="px-2 flex flex-col gap-2 flex-1 min-h-0 overflow-auto">
           <SideLink to="/" icon={<House size={18} />} end>
             首页
           </SideLink>
-          <SideLink to={projectEntryPath} icon={<FolderSimple size={18} />} title="项目" activePrefix="/projects">
+          <SideLink to={projectEntryPath} icon={<FolderSimple size={18} />} activePrefix="/projects">
             项目
           </SideLink>
         </nav>
@@ -86,14 +86,12 @@ function SideLink({
   children,
   icon,
   end,
-  title,
   activePrefix,
 }: {
   to: string;
   children: React.ReactNode;
   icon: React.ReactNode;
   end?: boolean;
-  title?: string;
   activePrefix?: string;
 }) {
   const location = useLocation();
@@ -102,29 +100,36 @@ function SideLink({
     <NavLink
       to={to}
       end={end}
-      title={title ?? (typeof children === "string" ? children : undefined)}
       className={({ isActive }) => {
         const active = isActive || (activePrefix ? location.pathname.startsWith(activePrefix) : false);
-        return `group flex items-center justify-center rounded-[var(--radius-sm)] px-3 py-2 text-sm transition-[background-color,color,box-shadow] duration-200 ${
+        return `group flex flex-col items-center justify-center gap-1 rounded-[var(--radius-sm)] px-2 py-2 text-[11px] leading-none transition-[background-color,color,box-shadow] duration-200 ${
           active
             ? "bg-[var(--color-surface)] text-[var(--color-text)] font-semibold shadow-[inset_3px_0_0_0_var(--color-accent)]"
             : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]/80 hover:text-[var(--color-text)]"
         }`;
       }}
     >
-      {({ isActive }) => (
-        <>
-          <span
-            className={`shrink-0 transition-opacity duration-200 ${
-              isActive || (activePrefix ? location.pathname.startsWith(activePrefix) : false)
-                ? "opacity-100"
-                : "opacity-70 group-hover:opacity-100"
-            }`}
-          >
-            {icon}
-          </span>
-        </>
-      )}
+      {({ isActive }) => {
+        const active = isActive || (activePrefix ? location.pathname.startsWith(activePrefix) : false);
+        return (
+          <>
+            <span
+              className={`shrink-0 transition-opacity duration-200 ${
+                active ? "opacity-100" : "opacity-70 group-hover:opacity-100"
+              }`}
+            >
+              {icon}
+            </span>
+            <span
+              className={`truncate max-w-full transition-opacity duration-200 ${
+                active ? "opacity-100" : "opacity-70 group-hover:opacity-100"
+              }`}
+            >
+              {children}
+            </span>
+          </>
+        );
+      }}
     </NavLink>
   );
 }

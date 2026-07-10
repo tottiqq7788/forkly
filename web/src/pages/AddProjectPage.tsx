@@ -175,8 +175,7 @@ export default function AddProjectPage({
       </Drawer>
 
       {repoChoice && (
-        <Drawer title="初始化" stackIndex={stackIndex + 1} width={440} onClose={() => setRepoChoice(null)}>
-          <h2 className="text-lg font-semibold mb-3">已检测到 Git 仓库</h2>
+        <Drawer title="已检测到 Git 仓库" stackIndex={stackIndex + 1} width={440} onClose={() => setRepoChoice(null)}>
           <p className="text-sm text-[var(--color-text-secondary)] mb-4">
             <span className="font-mono text-[var(--color-text)]">{repoChoice.path}</span>{" "}
             已经包含 Git 历史。你可以复用现有仓库，或清空 `.git` 后从当前文件重新开始。

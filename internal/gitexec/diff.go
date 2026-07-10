@@ -213,32 +213,46 @@ func dataURL(mime string, data []byte) string {
 
 func assertInsideRepo(repo, rel string) error {
 	clean := filepath.Clean(filepath.FromSlash(rel))
+	if clean == "." {
+		return nil
+	}
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return fmt.Errorf("path escapes repository")
 	}
 	abs := filepath.Join(repo, clean)
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		// file may be deleted
-		parent, err2 := filepath.EvalSymlinks(filepath.Dir(abs))
-		if err2 != nil {
-			return nil // allow deleted paths for diff
-		}
-		repoResolved, err3 := filepath.EvalSymlinks(repo)
-		if err3 != nil {
-			return err3
-		}
-		if !strings.HasPrefix(parent, repoResolved) {
-			return fmt.Errorf("path escapes repository")
-		}
-		return nil
-	}
 	repoResolved, err := filepath.EvalSymlinks(repo)
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(resolved, repoResolved+string(os.PathSeparator)) && resolved != repoResolved {
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		// File may be deleted / not yet created: validate the nearest existing parent.
+		parent := filepath.Dir(abs)
+		for {
+			parentResolved, err2 := filepath.EvalSymlinks(parent)
+			if err2 == nil {
+				if !pathWithinRoot(parentResolved, repoResolved) {
+					return fmt.Errorf("path escapes repository")
+				}
+				return nil
+			}
+			if parent == repo || parent == filepath.Dir(parent) {
+				// Nothing resolvable under repo; cleaned relative path already forbids `..`.
+				return nil
+			}
+			parent = filepath.Dir(parent)
+		}
+	}
+	if !pathWithinRoot(resolved, repoResolved) {
 		return fmt.Errorf("path escapes repository")
 	}
 	return nil
+}
+
+func pathWithinRoot(path, root string) bool {
+	if path == root {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	return strings.HasPrefix(path, root+sep)
 }

@@ -1,6 +1,8 @@
 package gitexec
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -35,6 +37,48 @@ func TestAssertInsideRepo(t *testing.T) {
 	}
 	if err := assertInsideRepo(dir, "../escape"); err == nil {
 		t.Fatal("expected escape error")
+	}
+}
+
+func TestAssertInsideRepoRejectsSiblingPrefixSymlink(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "proj")
+	sibling := filepath.Join(base, "proj-secrets")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sibling, "secret.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(repo, "link")
+	if err := os.Symlink(sibling, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	// Existing file through symlink escape
+	if err := assertInsideRepo(repo, "link/secret.txt"); err == nil {
+		t.Fatal("expected escape for existing symlink target")
+	}
+	// Deleted/missing path under symlink parent (prefix bypass case)
+	if err := assertInsideRepo(repo, "link/deleted.txt"); err == nil {
+		t.Fatal("expected escape for deleted path under symlink parent")
+	}
+}
+
+func TestAssertObjectID(t *testing.T) {
+	ok := []string{"abc1234", "0123456789abcdef0123456789abcdef01234567", "ABCDEF0"}
+	for _, id := range ok {
+		if err := assertObjectID(id); err != nil {
+			t.Fatalf("%q should be ok: %v", id, err)
+		}
+	}
+	bad := []string{"", "--output=/tmp/x", "-n", "HEAD", "abc", "zzzzzzz", "../foo"}
+	for _, id := range bad {
+		if err := assertObjectID(id); err == nil {
+			t.Fatalf("%q should be rejected", id)
+		}
 	}
 }
 

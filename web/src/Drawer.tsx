@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
+import { X } from "@phosphor-icons/react";
 
 const ANIMATION_MS = 220;
 
@@ -59,26 +60,26 @@ export function Drawer({
         }`}
       />
       <section
-        className={`absolute inset-y-0 right-0 h-full bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-[-16px_0_40px_rgba(15,23,42,0.18)] pointer-events-auto transition-transform duration-[220ms] ease-out ${
+        className={`absolute inset-y-0 right-0 h-full bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-[-16px_0_40px_rgba(15,23,42,0.18)] pointer-events-auto transition-transform duration-[220ms] ease-out flex flex-col ${
           visible ? "translate-x-0" : "translate-x-full"
         }`}
         style={{ width }}
         aria-label={title}
+        role="dialog"
+        aria-modal="true"
       >
-        <button
-          type="button"
-          onClick={requestClose}
-          className="absolute left-[-40px] w-10 rounded-l-[var(--radius-lg)] border border-r-0 border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-2.5 text-xs font-semibold leading-none shadow-[-10px_8px_24px_rgba(15,23,42,0.16)] hover:bg-[var(--color-surface-hover)]"
-          style={{ top: 16 }}
-          title={`关闭${title}`}
-        >
-          <span className="flex flex-col items-center gap-1.5">
-            {[...title].map((char, i) => (
-              <span key={`${char}-${i}`}>{char}</span>
-            ))}
-          </span>
-        </button>
-        <div className="h-full overflow-auto p-6">{children}</div>
+        <header className="flex items-center justify-between gap-3 shrink-0 border-b border-[var(--color-border)] px-6 py-4">
+          <h2 className="min-w-0 truncate text-lg font-semibold">{title}</h2>
+          <button
+            type="button"
+            onClick={requestClose}
+            aria-label={`关闭${title}`}
+            className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-sm)] p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+          >
+            <X size={18} weight="bold" />
+          </button>
+        </header>
+        <div className="flex-1 min-h-0 overflow-auto p-6">{children}</div>
       </section>
     </div>
   );

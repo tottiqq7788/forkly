@@ -32,6 +32,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>forkly</string>
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleName</key><string>${APP_NAME}</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
@@ -42,6 +43,13 @@ cat > "$APP/Contents/Info.plist" <<EOF
 EOF
 
 echo "APPL????" > "$APP/Contents/PkgInfo"
+
+ICON_SRC="$ROOT/packaging/macos/AppIcon.icns"
+if [[ ! -f "$ICON_SRC" ]]; then
+  echo "missing app icon: $ICON_SRC" >&2
+  exit 1
+fi
+cp "$ICON_SRC" "$APP/Contents/Resources/AppIcon.icns"
 
 # Ensure git runtime
 bash "$ROOT/scripts/fetch-git-runtime.sh" "$GOARCH"

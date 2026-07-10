@@ -17,7 +17,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.3"
+var Version = "0.1.4"
 
 func Run(ctx context.Context, log *diagnostics.Logger) error {
 	dataDir, err := config.DefaultDataDir()
@@ -90,14 +90,17 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 		_ = wm.Watch(p.ID, p.Path)
 	}
 
-	onExit := make(chan struct{})
 	go func() {
 		<-ctx.Done()
 		systray.Quit()
 	}()
 
+	// systray.Run blocks until Quit; on macOS onExit may not fire, so do not
+	// wait on a second channel after Run returns — let defers clean up and exit.
 	systray.Run(func() {
-		systray.SetTitle("Forkly")
+		icon := trayIconBytes()
+		systray.SetTemplateIcon(icon, icon)
+		systray.SetTitle("")
 		systray.SetTooltip("Forkly " + Version)
 		mOpen := systray.AddMenuItem("打开控制台", "在浏览器中打开本地控制台")
 		list, _ := projects.List(context.Background())
@@ -138,10 +141,7 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 				}
 			}
 		}()
-	}, func() {
-		close(onExit)
-	})
+	}, nil)
 
-	<-onExit
 	return nil
 }
