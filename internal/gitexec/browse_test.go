@@ -25,7 +25,7 @@ func TestListTreeWorktreeAndHead(t *testing.T) {
 	}
 
 	e := testExecutor(t)
-	wt, err := e.ListTree(context.Background(), dir, SourceWorktree, "", 0, 50)
+	wt, err := e.ListTree(context.Background(), dir, SourceWorktree, "", 0, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestListTreeWorktreeAndHead(t *testing.T) {
 		t.Fatal("missing docs dir")
 	}
 
-	head, err := e.ListTree(context.Background(), dir, SourceHead, "", 0, 50)
+	head, err := e.ListTree(context.Background(), dir, SourceHead, "", 0, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestListTreeWorktreeAndHead(t *testing.T) {
 		t.Fatal("HEAD missing tracked.txt")
 	}
 
-	docs, err := e.ListTree(context.Background(), dir, SourceWorktree, "docs", 0, 50)
+	docs, err := e.ListTree(context.Background(), dir, SourceWorktree, "docs", 0, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestListTreeEmptyHead(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 	e := testExecutor(t)
-	listing, err := e.ListTree(context.Background(), dir, SourceHead, "", 0, 50)
+	listing, err := e.ListTree(context.Background(), dir, SourceHead, "", 0, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,14 +93,14 @@ func TestListTreePagination(t *testing.T) {
 		}
 	}
 	e := testExecutor(t)
-	page1, err := e.ListTree(context.Background(), dir, SourceWorktree, "", 0, 2)
+	page1, err := e.ListTree(context.Background(), dir, SourceWorktree, "", 0, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page1.Entries) != 2 || !page1.HasMore || page1.NextOffset != 2 {
 		t.Fatalf("page1=%#v", page1)
 	}
-	page2, err := e.ListTree(context.Background(), dir, SourceWorktree, "", page1.NextOffset, 2)
+	page2, err := e.ListTree(context.Background(), dir, SourceWorktree, "", page1.NextOffset, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestBrowseRejectsEscapeAndGit(t *testing.T) {
 	initRepo(t, dir)
 	commitFile(t, dir, "a.txt", "a\n", "a")
 	e := testExecutor(t)
-	if _, err := e.ListTree(context.Background(), dir, SourceWorktree, "../outside", 0, 50); err == nil {
+	if _, err := e.ListTree(context.Background(), dir, SourceWorktree, "../outside", 0, 50, nil); err == nil {
 		t.Fatal("expected escape error")
 	}
 	if _, err := e.ReadContent(context.Background(), dir, SourceWorktree, ".git/config"); err == nil {
@@ -163,7 +163,7 @@ func TestBrowseRejectsOutsideSymlink(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 	e := testExecutor(t)
-	if _, err := e.ListTree(context.Background(), dir, SourceWorktree, "escape", 0, 50); err == nil {
+	if _, err := e.ListTree(context.Background(), dir, SourceWorktree, "escape", 0, 50, nil); err == nil {
 		t.Fatal("expected symlink dir escape error")
 	}
 	if err := os.Remove(link); err != nil {
@@ -230,6 +230,40 @@ func TestNormalizeBrowsePath(t *testing.T) {
 	}
 	if _, err := normalizeBrowsePath("-rf"); err == nil {
 		t.Fatal("expected dash path error")
+	}
+}
+
+func TestMatchesHideRulesDSStore(t *testing.T) {
+	rules := []string{"*.DS*"}
+	if !MatchesHideRules(".DS_Store", ".DS_Store", rules) {
+		t.Fatal("expected .DS_Store hidden")
+	}
+	if !MatchesHideRules(".DS_Store", "未命名文件夹/.DS_Store", rules) {
+		t.Fatal("expected nested .DS_Store hidden")
+	}
+	if MatchesHideRules("本文件.txt", "本文件.txt", rules) {
+		t.Fatal("normal file should show")
+	}
+}
+
+func TestListTreeHidesByRules(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("k\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := testExecutor(t)
+	listing, err := e.ListTree(context.Background(), dir, SourceWorktree, "", 0, 50, []string{"*.DS*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ent := range listing.Entries {
+		if ent.Name == ".DS_Store" {
+			t.Fatal(".DS_Store should be filtered")
+		}
 	}
 }
 

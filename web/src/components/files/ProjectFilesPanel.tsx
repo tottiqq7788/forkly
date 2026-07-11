@@ -13,40 +13,48 @@ type SourceSelection = {
   path: string;
 };
 
+function emptyExpandedBySource(): Record<BrowseSource, Set<string>> {
+  return {
+    worktree: new Set([""]),
+    head: new Set([""]),
+  };
+}
+
 export function ProjectFilesPanel({ projectID, projectName }: Props) {
   const [source, setSource] = useState<BrowseSource>("worktree");
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]));
+  const [expandedBySource, setExpandedBySource] = useState(emptyExpandedBySource);
   const [selection, setSelection] = useState<Record<BrowseSource, SourceSelection>>({
     worktree: { path: "" },
     head: { path: "" },
   });
 
+  const expanded = expandedBySource[source];
   const activePath = selection[source].path;
 
   useEffect(() => {
-    setExpanded(new Set([""]));
+    setExpandedBySource(emptyExpandedBySource());
     setSelection({ worktree: { path: "" }, head: { path: "" } });
   }, [projectID]);
 
-  useEffect(() => {
-    setExpanded(new Set([""]));
-  }, [source]);
-
-  const expandDirs = useCallback((paths: string[]) => {
-    if (paths.length === 0) return;
-    setExpanded((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const path of paths) {
-        if (!next.has(path)) {
-          next.add(path);
-          changed = true;
+  const expandDirs = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      setExpandedBySource((prev) => {
+        const current = prev[source];
+        let changed = false;
+        const next = new Set(current);
+        for (const path of paths) {
+          if (!next.has(path)) {
+            next.add(path);
+            changed = true;
+          }
         }
-      }
-      return changed ? next : prev;
-    });
-  }, []);
-
+        if (!changed) return prev;
+        return { ...prev, [source]: next };
+      });
+    },
+    [source],
+  );
   const rootQuery = useInfiniteQuery({
     queryKey: ["workspace-tree", projectID, source, ""],
     initialPageParam: 0,
@@ -97,11 +105,11 @@ export function ProjectFilesPanel({ projectID, projectName }: Props) {
   }
 
   function toggleDir(path: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
+    setExpandedBySource((prev) => {
+      const next = new Set(prev[source]);
       if (next.has(path)) next.delete(path);
       else next.add(path);
-      return next;
+      return { ...prev, [source]: next };
     });
   }
 
@@ -278,7 +286,7 @@ function TreeNode({
           if (isDir) onToggleDir(entry.path);
           else onSelectFile(entry.path);
         }}
-        className={`w-full flex items-center gap-1 rounded-[var(--radius-sm)] px-1 py-1 text-sm text-left ${
+        className={`w-full flex items-center gap-1 rounded-[var(--radius-sm)] px-1 py-1 text-xs text-left ${
           active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
         }`}
         style={{ paddingLeft: 4 + depth * 14 }}
@@ -301,7 +309,7 @@ function TreeNode({
             <FileIcon size={14} />
           )}
         </span>
-        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+        <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
       </button>
       {isOpen && (
         <div>

@@ -188,7 +188,10 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (ProjectView, error) 
 	}
 	id := session.RandomURLSafe(12)
 	now := time.Now()
-	entry := config.ProjectEntry{ID: id, Name: name, Path: path, AddedAt: now, OpenedAt: now}
+	entry := config.ProjectEntry{
+		ID: id, Name: name, Path: path, AddedAt: now, OpenedAt: now,
+		HideRules: []string{config.DefaultHideRule},
+	}
 	err = s.store.Save(func(f *config.File) error {
 		f.Projects = append([]config.ProjectEntry{entry}, f.Projects...)
 		return nil
@@ -273,6 +276,26 @@ func (s *Service) Relocate(id, newPath string) error {
 		for i := range f.Projects {
 			if f.Projects[i].ID == id {
 				f.Projects[i].Path = newPath
+				return nil
+			}
+		}
+		return fmt.Errorf("项目不存在")
+	})
+}
+
+func (s *Service) UpdateHideRules(id string, rules []string) error {
+	cleaned := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		cleaned = append(cleaned, rule)
+	}
+	return s.store.Save(func(f *config.File) error {
+		for i := range f.Projects {
+			if f.Projects[i].ID == id {
+				f.Projects[i].HideRules = cleaned
 				return nil
 			}
 		}

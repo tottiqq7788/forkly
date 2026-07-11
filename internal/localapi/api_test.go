@@ -863,6 +863,28 @@ func TestBrowseTreeAndContentAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := os.WriteFile(filepath.Join(repo, ".DS_Store"), []byte("meta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hideBody, _ := json.Marshal(map[string]any{"hideRules": []string{"*.DS*"}})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/projects/"+id, bytes.NewReader(hideBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hideRes struct {
+		OK        bool     `json:"ok"`
+		HideRules []string `json:"hideRules"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&hideRes)
+	res.Body.Close()
+	if res.StatusCode != 200 || !hideRes.OK || len(hideRes.HideRules) != 1 || hideRes.HideRules[0] != "*.DS*" {
+		t.Fatalf("put hideRules: status=%d body=%+v", res.StatusCode, hideRes)
+	}
+
 	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/tree?source=worktree")
 	if err != nil {
 		t.Fatal(err)
@@ -881,6 +903,9 @@ func TestBrowseTreeAndContentAPI(t *testing.T) {
 	for _, e := range tree.Entries {
 		if e.Name == ".git" {
 			t.Fatal(".git listed")
+		}
+		if e.Name == ".DS_Store" {
+			t.Fatal(".DS_Store should be hidden by hideRules")
 		}
 		if e.Name == "extra.txt" {
 			foundExtra = true

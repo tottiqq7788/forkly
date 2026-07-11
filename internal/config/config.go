@@ -19,6 +19,21 @@ type ProjectEntry struct {
 	Path      string    `json:"path"`
 	AddedAt   time.Time `json:"addedAt"`
 	OpenedAt  time.Time `json:"openedAt"`
+	// HideRules are glob patterns (one conceptually per line in UI).
+	// nil means “never configured” and ResolvedHideRules returns the default;
+	// an empty slice means the user cleared all rules.
+	HideRules []string `json:"hideRules"`
+}
+
+// DefaultHideRule hides common macOS Finder metadata files in the files tree.
+const DefaultHideRule = "*.DS*"
+
+// ResolvedHideRules returns patterns used when listing the files tree.
+func (p ProjectEntry) ResolvedHideRules() []string {
+	if p.HideRules == nil {
+		return []string{DefaultHideRule}
+	}
+	return p.HideRules
 }
 
 type GitIdentity struct {

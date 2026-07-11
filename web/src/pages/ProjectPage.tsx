@@ -42,9 +42,9 @@ export default function ProjectPage() {
   const qc = useQueryClient();
   const tab: ProjectTab = location.pathname.endsWith("/history")
     ? "history"
-    : location.pathname.endsWith("/files")
-      ? "files"
-      : "changes";
+    : location.pathname.endsWith("/changes")
+      ? "changes"
+      : "files";
   const [filter, setFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activePath, setActivePath] = useState<string>("");
@@ -64,6 +64,8 @@ export default function ProjectPage() {
   const [identityErr, setIdentityErr] = useState("");
 
   const [refreshing, setRefreshing] = useState(false);
+  const [hideRulesText, setHideRulesText] = useState("*.DS*");
+  const [hideRulesSaved, setHideRulesSaved] = useState(false);
 
   useEffect(() => {
     setFilter("all");
@@ -81,19 +83,31 @@ export default function ProjectPage() {
     setSettingsErr("");
     setIdentityErr("");
     setRefreshing(false);
+    setHideRulesText("*.DS*");
+    setHideRulesSaved(false);
   }, [id]);
 
   function setTab(next: ProjectTab) {
     const base = `/projects/${id}`;
     if (next === "history") nav(`${base}/history`, { replace: true });
-    else if (next === "files") nav(`${base}/files`, { replace: true });
+    else if (next === "changes") nav(`${base}/changes`, { replace: true });
     else nav(base, { replace: true });
   }
 
   const project = useQuery({
     queryKey: ["project", id],
-    queryFn: () => api<{ id: string; name: string; path: string }>(`/local-api/v1/projects/${id}`),
+    queryFn: () =>
+      api<{ id: string; name: string; path: string; hideRules?: string[] }>(
+        `/local-api/v1/projects/${id}`,
+      ),
   });
+
+  useEffect(() => {
+    if (!project.data) return;
+    const rules = project.data.hideRules ?? ["*.DS*"];
+    setHideRulesText(rules.join("\n"));
+  }, [project.data]);
+
   const status = useQuery({
     queryKey: ["status", id],
     queryFn: () => api<StatusSnapshot>(`/local-api/v1/projects/${id}/status`),
@@ -205,6 +219,30 @@ export default function ProjectPage() {
         qc.invalidateQueries({ queryKey: ["status", id] }),
         qc.invalidateQueries({ queryKey: ["projects"] }),
         qc.invalidateQueries({ queryKey: ["dashboard-activity"] }),
+      ]);
+    },
+    onError: (e: Error) => setSettingsErr(e.message),
+  });
+
+  const saveHideRules = useMutation({
+    mutationFn: () => {
+      const rules = hideRulesText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      return api<{ ok: boolean; hideRules: string[] }>(`/local-api/v1/projects/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ hideRules: rules }),
+      });
+    },
+    onSuccess: async (data) => {
+      setSettingsErr("");
+      setHideRulesText((data.hideRules ?? []).join("\n"));
+      setHideRulesSaved(true);
+      window.setTimeout(() => setHideRulesSaved(false), 1500);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["project", id] }),
+        qc.invalidateQueries({ queryKey: ["workspace-tree", id] }),
       ]);
     },
     onError: (e: Error) => setSettingsErr(e.message),
@@ -640,6 +678,33 @@ export default function ProjectPage() {
               >
                 重新定位文件夹…
               </button>
+            </div>
+
+            <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
+              <div className="text-sm font-medium mb-1">隐藏项</div>
+              <p className="text-xs text-[var(--color-text-secondary)] mb-2">
+                一行一条规则，匹配文件名的项不会出现在「文件」页目录树中。支持通配符，如{" "}
+                <span className="font-mono">*.DS*</span>。
+              </p>
+              <textarea
+                value={hideRulesText}
+                onChange={(e) => {
+                  setHideRulesText(e.target.value);
+                  setHideRulesSaved(false);
+                }}
+                onBlur={() => saveHideRules.mutate()}
+                rows={4}
+                spellCheck={false}
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-sm font-mono leading-relaxed resize-y min-h-[88px]"
+                placeholder={"*.DS*"}
+              />
+              <div className="mt-1.5 text-xs text-[var(--color-text-tertiary)]">
+                {saveHideRules.isPending
+                  ? "保存中…"
+                  : hideRulesSaved
+                    ? "已保存"
+                    : "失焦后自动保存"}
+              </div>
             </div>
 
             <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">

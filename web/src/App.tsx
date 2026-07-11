@@ -73,6 +73,7 @@ export default function App() {
           <Route path="/add" element={<HomePage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
           <Route path="/projects/:id/files" element={<ProjectPage />} />
+          <Route path="/projects/:id/changes" element={<ProjectPage />} />
           <Route path="/projects/:id/history" element={<ProjectPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>

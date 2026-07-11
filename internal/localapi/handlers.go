@@ -154,7 +154,41 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, http.StatusNotFound, err.Error())
 				return
 			}
-			writeJSON(w, http.StatusOK, p)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"id":        p.ID,
+				"name":      p.Name,
+				"path":      p.Path,
+				"addedAt":   p.AddedAt,
+				"openedAt":  p.OpenedAt,
+				"hideRules": p.ResolvedHideRules(),
+			})
+		case http.MethodPut:
+			s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					HideRules []string `json:"hideRules"`
+				}
+				if err := decodeJSON(r, &body); err != nil {
+					writeErr(w, http.StatusBadRequest, "请求无效")
+					return
+				}
+				if body.HideRules == nil {
+					writeErr(w, http.StatusBadRequest, "缺少 hideRules")
+					return
+				}
+				if err := s.deps.Projects.UpdateHideRules(id, body.HideRules); err != nil {
+					writeErr(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				p, err := s.deps.Projects.Get(id)
+				if err != nil {
+					writeErr(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"ok":        true,
+					"hideRules": p.ResolvedHideRules(),
+				})
+			})(w, r)
 		default:
 			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -223,7 +257,7 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 				limit = n
 			}
 		}
-		listing, err := s.deps.Git.ListTree(r.Context(), p.Path, source, r.URL.Query().Get("path"), offset, limit)
+		listing, err := s.deps.Git.ListTree(r.Context(), p.Path, source, r.URL.Query().Get("path"), offset, limit, p.ResolvedHideRules())
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return

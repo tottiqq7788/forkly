@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -78,7 +79,7 @@ func NormalizeTreeLimit(limit int) int {
 	return limit
 }
 
-func (e *Executor) ListTree(ctx context.Context, repo string, source BrowseSource, rel string, offset, limit int) (TreeListing, error) {
+func (e *Executor) ListTree(ctx context.Context, repo string, source BrowseSource, rel string, offset, limit int, hideRules []string) (TreeListing, error) {
 	rel, err := normalizeBrowsePath(rel)
 	if err != nil {
 		return TreeListing{}, err
@@ -94,6 +95,7 @@ func (e *Executor) ListTree(ctx context.Context, repo string, source BrowseSourc
 		if err != nil {
 			return TreeListing{}, err
 		}
+		entries = FilterHiddenEntries(entries, hideRules)
 		return paginateTree(out, entries, offset, limit), nil
 	case SourceHead:
 		entries, empty, err := e.listHeadDir(ctx, repo, rel)
@@ -101,10 +103,52 @@ func (e *Executor) ListTree(ctx context.Context, repo string, source BrowseSourc
 			return TreeListing{}, err
 		}
 		out.EmptyHead = empty
+		entries = FilterHiddenEntries(entries, hideRules)
 		return paginateTree(out, entries, offset, limit), nil
 	default:
 		return TreeListing{}, fmt.Errorf("source 无效")
 	}
+}
+
+// FilterHiddenEntries drops entries whose name or path matches any hide rule glob.
+func FilterHiddenEntries(entries []TreeEntry, rules []string) []TreeEntry {
+	if len(rules) == 0 {
+		return entries
+	}
+	out := make([]TreeEntry, 0, len(entries))
+	for _, entry := range entries {
+		if MatchesHideRules(entry.Name, entry.Path, rules) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// MatchesHideRules reports whether name or relative path matches a rule.
+// Rules use path.Match globs; blank lines and # comments are ignored.
+func MatchesHideRules(name, relPath string, rules []string) bool {
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" || strings.HasPrefix(rule, "#") {
+			continue
+		}
+		if ok, err := path.Match(rule, name); err == nil && ok {
+			return true
+		}
+		if relPath != "" {
+			if ok, err := path.Match(rule, relPath); err == nil && ok {
+				return true
+			}
+			base := filepath.Base(relPath)
+			if base != name {
+				if ok, err := path.Match(rule, base); err == nil && ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (e *Executor) ReadContent(ctx context.Context, repo string, source BrowseSource, rel string) (FileContent, error) {
