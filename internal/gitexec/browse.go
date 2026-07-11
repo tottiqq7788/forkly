@@ -47,15 +47,20 @@ type TreeListing struct {
 }
 
 type FileContent struct {
-	Path      string       `json:"path"`
-	Source    BrowseSource `json:"source"`
-	Kind      DiffKind     `json:"kind"`
-	Mime      string       `json:"mime,omitempty"`
-	Size      int64        `json:"size,omitempty"`
-	Content   string       `json:"content,omitempty"`
-	DataURL   string       `json:"dataUrl,omitempty"`
-	Truncated bool         `json:"truncated,omitempty"`
-	Message   string       `json:"message,omitempty"`
+	Path            string       `json:"path"`
+	Source          BrowseSource `json:"source"`
+	Kind            DiffKind     `json:"kind"`
+	Mime            string       `json:"mime,omitempty"`
+	Size            int64        `json:"size,omitempty"`
+	Content         string       `json:"content"`
+	DataURL         string       `json:"dataUrl,omitempty"`
+	Truncated       bool         `json:"truncated,omitempty"`
+	Message         string       `json:"message,omitempty"`
+	Revision        string       `json:"revision,omitempty"`
+	Editable        bool         `json:"editable"`
+	LineEnding      string       `json:"lineEnding,omitempty"`
+	HasUtf8Bom      bool         `json:"hasUtf8Bom,omitempty"`
+	HasFinalNewline bool         `json:"hasFinalNewline,omitempty"`
 }
 
 func ParseBrowseSource(s string) (BrowseSource, error) {
@@ -516,6 +521,7 @@ func (e *Executor) readHeadFile(ctx context.Context, repo, rel string) (FileCont
 			return FileContent{}, err
 		}
 		out.DataURL = dataURL(mimeByExt(rel), data)
+		out.Revision = contentRevision(data)
 		return out, nil
 	case DiffBinary:
 		out.Message = "二进制文件，仅显示元数据"
@@ -526,6 +532,7 @@ func (e *Executor) readHeadFile(ctx context.Context, repo, rel string) (FileCont
 			out.Kind = DiffTooLarge
 			out.Truncated = true
 			out.Message = "文件过大，无法预览全文"
+			out.Editable = false
 			return out, nil
 		}
 		data, err := e.catBlob(ctx, repo, oid, int(size))
@@ -538,8 +545,7 @@ func (e *Executor) readHeadFile(ctx context.Context, repo, rel string) (FileCont
 			out.Message = "二进制文件，仅显示元数据"
 			return out, nil
 		}
-		out.Content = string(data)
-		return out, nil
+		return enrichTextContent(out, data), nil
 	}
 }
 
@@ -610,6 +616,7 @@ func fillContentFromFile(out FileContent, abs string, size int64, kind DiffKind)
 			return FileContent{}, fmt.Errorf("读取失败")
 		}
 		out.DataURL = dataURL(mimeByExt(out.Path), data)
+		out.Revision = contentRevision(data)
 		return out, nil
 	case DiffBinary:
 		out.Message = "二进制文件，仅显示元数据"
@@ -633,6 +640,7 @@ func fillContentFromFile(out FileContent, abs string, size int64, kind DiffKind)
 			out.Truncated = true
 			out.Content = string(data)
 			out.Message = "文件过大，仅显示部分内容"
+			out.Editable = false
 			return out, nil
 		}
 		data, err := os.ReadFile(abs)
@@ -644,8 +652,7 @@ func fillContentFromFile(out FileContent, abs string, size int64, kind DiffKind)
 			out.Message = "二进制文件，仅显示元数据"
 			return out, nil
 		}
-		out.Content = string(data)
-		return out, nil
+		return enrichTextContent(out, data), nil
 	}
 }
 

@@ -1,6 +1,8 @@
 package localapi
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -264,6 +266,47 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, listing)
 	case "content":
+		switch r.Method {
+		case http.MethodGet, http.MethodHead:
+			source, err := gitexec.ParseBrowseSource(r.URL.Query().Get("source"))
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			file := r.URL.Query().Get("path")
+			if file == "" {
+				writeErr(w, http.StatusBadRequest, "缺少 path")
+				return
+			}
+			content, err := s.deps.Git.ReadContent(r.Context(), p.Path, source, file)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if content.Revision != "" {
+				etag := `"` + content.Revision + `"`
+				w.Header().Set("ETag", etag)
+				w.Header().Set("Cache-Control", "private, no-cache")
+				if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			writeJSON(w, http.StatusOK, content)
+		case http.MethodPut:
+			s.authWrite(s.handlePutContent(id, p))(w, r)
+		default:
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	case "asset":
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
 		source, err := gitexec.ParseBrowseSource(r.URL.Query().Get("source"))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
@@ -274,12 +317,29 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "缺少 path")
 			return
 		}
-		content, err := s.deps.Git.ReadContent(r.Context(), p.Path, source, file)
+		mime, data, revision, err := s.deps.Git.ReadAssetBytes(r.Context(), p.Path, source, file)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, content)
+		if revision != "" {
+			etag := `"` + revision + `"`
+			w.Header().Set("ETag", etag)
+			if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", mime)
+			w.Header().Set("Cache-Control", "private, no-cache")
+			w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		gitexec.WriteAssetHTTP(w, mime, data, revision)
+	case "assets":
+		s.authWrite(s.handlePostAssets(id, p))(w, r)
 	case "commit":
 		s.authWrite(s.handleCommit(id, p))(w, r)
 	case "history":
@@ -474,6 +534,95 @@ func (s *Server) handleBranches(w http.ResponseWriter, r *http.Request, id strin
 		})(w, r)
 	default:
 		writeErr(w, http.StatusNotFound, "not found")
+	}
+}
+
+func (s *Server) handlePutContent(id string, p config.ProjectEntry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		var body struct {
+			Path     string `json:"path"`
+			Content  string `json:"content"`
+			Revision string `json:"revision"`
+		}
+		if err := decodeJSON(r, &body); err != nil {
+			writeErr(w, http.StatusBadRequest, "请求无效")
+			return
+		}
+		if body.Path == "" {
+			writeErr(w, http.StatusBadRequest, "缺少 path")
+			return
+		}
+		res, err := s.deps.Git.WriteContent(p.Path, body.Path, body.Content, body.Revision)
+		if err != nil {
+			var conflict *gitexec.ContentConflict
+			if errors.As(err, &conflict) {
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": "content_conflict",
+					"code":  "content_conflict",
+					"details": map[string]any{
+						"path":             conflict.Path,
+						"expectedRevision": conflict.ExpectedRevision,
+						"currentRevision":  conflict.CurrentRevision,
+					},
+				})
+				return
+			}
+			if errors.Is(err, gitexec.ErrNotEditable) {
+				writeErr(w, http.StatusBadRequest, "文件不可编辑")
+				return
+			}
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.deps.Projects.TouchOpened(id)
+		writeJSON(w, http.StatusOK, res)
+	}
+}
+
+func (s *Server) handlePostAssets(id string, p config.ProjectEntry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		const maxMemory = 1 << 20
+		if err := r.ParseMultipartForm(maxMemory); err != nil {
+			writeErr(w, http.StatusBadRequest, "请求无效")
+			return
+		}
+		markdownPath := r.FormValue("path")
+		if markdownPath == "" {
+			writeErr(w, http.StatusBadRequest, "缺少 path")
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "缺少 file")
+			return
+		}
+		defer file.Close()
+		limited := io.LimitReader(file, gitexec.MaxAssetUploadBytes+1)
+		data, err := io.ReadAll(limited)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "读取上传失败")
+			return
+		}
+		if int64(len(data)) > gitexec.MaxAssetUploadBytes {
+			writeErr(w, http.StatusBadRequest, "图片过大")
+			return
+		}
+		name := header.Filename
+		res, err := s.deps.Git.WriteAsset(p.Path, markdownPath, name, data)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.deps.Projects.TouchOpened(id)
+		writeJSON(w, http.StatusCreated, res)
 	}
 }
 

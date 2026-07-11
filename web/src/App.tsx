@@ -1,10 +1,7 @@
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { House, Gear, FolderSimple } from "@phosphor-icons/react";
 import { api, fetchSessionMe, Project } from "./api";
-import HomePage from "./pages/HomePage";
-import ProjectPage from "./pages/ProjectPage";
-import SettingsPage from "./pages/SettingsPage";
 import AddProjectPage from "./pages/AddProjectPage";
 
 export default function App() {
@@ -82,15 +79,7 @@ export default function App() {
           isProjectRoute ? "overflow-hidden" : "overflow-auto"
         }`}
       >
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/add" element={<HomePage />} />
-          <Route path="/projects/:id" element={<ProjectPage />} />
-          <Route path="/projects/:id/files" element={<ProjectPage />} />
-          <Route path="/projects/:id/changes" element={<ProjectPage />} />
-          <Route path="/projects/:id/history" element={<ProjectPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Routes>
+        <Outlet />
         {showAddDrawer && <AddProjectPage />}
       </main>
     </div>

@@ -20,9 +20,19 @@ for the corresponding Git version must remain available to recipients.
 - License: BSD-3-Clause
 - https://github.com/fsnotify/fsnotify
 
+## Muya / `@muyajs/core` (vendored, modified)
+
+Forkly distributes a **modified snapshot** of MarkText's Muya editor core for
+worktree Markdown editing.
+
+- License: MIT — see `muya/LICENSE`
+- Upstream: https://github.com/marktext/marktext (`packages/muya`)
+- Pin / sync notes: `muya/UPSTREAM.md`
+- Forkly-specific patches: `muya/FORKLY_PATCHES.md`
+
 ## Markdown preview (web UI)
 
-Runtime packages used by the project file Markdown preview:
+Runtime packages used by the project file Markdown preview (read-only mode):
 
 - `react-markdown` — MIT — https://github.com/remarkjs/react-markdown
 - `remark-gfm` — MIT — https://github.com/remarkjs/remark-gfm
@@ -34,7 +44,3 @@ Runtime packages used by the project file Markdown preview:
 - `mermaid` — MIT — https://github.com/mermaid-js/mermaid
 - `dompurify` — MPL-2.0 OR Apache-2.0 — https://github.com/cure53/DOMPurify
 - `highlight.js` (via `rehype-highlight` / `lowlight`) — BSD-3-Clause
-
-Design inspiration for export-style security, Mermaid strict mode, and relative
-asset rewriting was taken from MarkText / `@muyajs/core` (MIT); Forkly does not
-bundle the MarkText editor runtime.

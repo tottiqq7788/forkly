@@ -119,7 +119,46 @@ export type FileContent = {
   dataUrl?: string;
   truncated?: boolean;
   message?: string;
+  revision?: string;
+  editable?: boolean;
+  lineEnding?: string;
+  hasUtf8Bom?: boolean;
+  hasFinalNewline?: boolean;
 };
+
+export type WriteContentResult = {
+  path: string;
+  revision: string;
+  size: number;
+};
+
+export type UploadAssetResult = {
+  path: string;
+  relativePath: string;
+  mime: string;
+  size: number;
+  revision?: string;
+};
+
+export type ContentConflictDetails = {
+  path?: string;
+  expectedRevision?: string;
+  currentRevision?: string;
+};
+
+export class APIError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(message: string, status: number, code?: string, details?: unknown) {
+    super(message);
+    this.name = "APIError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
 
 function csrfToken(): string {
   const m = document.cookie.match(/(?:^|; )forkly_csrf=([^;]*)/);
@@ -130,16 +169,75 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.method && init.method !== "GET" && init.method !== "HEAD") {
     headers.set("X-Forkly-CSRF", csrfToken());
-    if (!headers.has("Content-Type") && init.body) {
+    const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+    if (!isFormData && !headers.has("Content-Type") && init.body) {
       headers.set("Content-Type", "application/json");
     }
   }
   const res = await fetch(path, { ...init, headers, credentials: "same-origin" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || res.statusText);
+    const body = data as { error?: string; code?: string; details?: unknown };
+    throw new APIError(body.error || res.statusText, res.status, body.code, body.details);
   }
   return data as T;
+}
+
+/** Content unchanged under If-None-Match. */
+export const CONTENT_NOT_MODIFIED = Symbol("CONTENT_NOT_MODIFIED");
+
+export async function fetchFileContent(
+  projectID: string,
+  source: BrowseSource,
+  path: string,
+  opts?: { etag?: string },
+): Promise<FileContent | typeof CONTENT_NOT_MODIFIED> {
+  const headers = new Headers();
+  if (opts?.etag) headers.set("If-None-Match", opts.etag);
+  const res = await fetch(
+    `/local-api/v1/projects/${projectID}/content?source=${source}&path=${encodeURIComponent(path)}`,
+    { headers, credentials: "same-origin" },
+  );
+  if (res.status === 304) return CONTENT_NOT_MODIFIED;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const body = data as { error?: string; code?: string; details?: unknown };
+    throw new APIError(body.error || res.statusText, res.status, body.code, body.details);
+  }
+  return data as FileContent;
+}
+
+export function putFileContent(
+  projectID: string,
+  body: { path: string; content: string; revision: string },
+): Promise<WriteContentResult> {
+  return api<WriteContentResult>(`/local-api/v1/projects/${projectID}/content`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function uploadMarkdownAsset(
+  projectID: string,
+  markdownPath: string,
+  file: Blob,
+  filename?: string,
+): Promise<UploadAssetResult> {
+  const form = new FormData();
+  form.set("path", markdownPath);
+  form.set("file", file, filename || "image.png");
+  return api<UploadAssetResult>(`/local-api/v1/projects/${projectID}/assets`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function assetURL(
+  projectID: string,
+  source: BrowseSource,
+  path: string,
+): string {
+  return `/local-api/v1/projects/${projectID}/asset?source=${source}&path=${encodeURIComponent(path)}`;
 }
 
 export type SessionMe = {

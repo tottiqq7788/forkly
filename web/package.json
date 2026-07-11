@@ -1,16 +1,18 @@
 {
   "name": "forkly-web",
   "private": true,
-  "version": "0.1.20",
+  "version": "0.1.21",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postinstall": "npm install --omit=dev --legacy-peer-deps --prefix ../third_party/muya"
   },
   "dependencies": {
+    "@muyajs/core": "file:../third_party/muya",
     "@phosphor-icons/react": "^2.1.7",
     "@tanstack/react-query": "^5.66.0",
     "dompurify": "^3.4.12",

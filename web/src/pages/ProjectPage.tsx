@@ -15,6 +15,7 @@ import {
 import { api, DiffResult, FileStatus, Project, SessionMe, StatusSnapshot } from "../api";
 import { Drawer } from "../Drawer";
 import { ProjectFilesPanel } from "../components/files/ProjectFilesPanel";
+import { useMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { BranchDrawer } from "../components/branches/BranchDrawer";
 import AddProjectPage from "./AddProjectPage";
 
@@ -70,6 +71,7 @@ export default function ProjectPage() {
   const [hideRulesSaved, setHideRulesSaved] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [filesBranchKey, setFilesBranchKey] = useState("");
+  const { flush: flushMarkdown } = useMarkdownSaveGuard();
 
   useEffect(() => {
     setFilter("all");
@@ -93,7 +95,9 @@ export default function ProjectPage() {
     setFilesBranchKey("");
   }, [id]);
 
-  function setTab(next: ProjectTab) {
+  async function setTab(next: ProjectTab) {
+    const ok = await flushMarkdown();
+    if (!ok) return;
     const base = `/projects/${id}`;
     // Leaving a tab: clear selection so returning defaults to the first item.
     setActivePath("");
@@ -158,6 +162,8 @@ export default function ProjectPage() {
 
   async function handleRefresh() {
     if (refreshing) return;
+    const ok = await flushMarkdown();
+    if (!ok) return;
     setRefreshing(true);
     const started = Date.now();
     try {
@@ -178,8 +184,10 @@ export default function ProjectPage() {
     }
   }
 
-  function openCommitFlow() {
+  async function openCommitFlow() {
     setErr("");
+    const ok = await flushMarkdown();
+    if (!ok) return;
     if (me.isLoading) return;
     if (me.isError) {
       setErr("无法确认提交身份，请刷新后重试");
@@ -193,6 +201,12 @@ export default function ProjectPage() {
       return;
     }
     setCommitOpen(true);
+  }
+
+  async function openBranchDrawer() {
+    const ok = await flushMarkdown();
+    if (!ok) return;
+    setBranchOpen(true);
   }
 
   const saveIdentity = useMutation({
@@ -411,7 +425,7 @@ export default function ProjectPage() {
           </div>
           <button
             type="button"
-            onClick={() => setBranchOpen(true)}
+            onClick={() => void openBranchDrawer()}
             className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-[var(--radius-sm)] px-1 -ml-1 text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
             title="管理分支"
           >
@@ -422,13 +436,13 @@ export default function ProjectPage() {
           </button>
         </div>
         <div className="ml-auto flex rounded-[var(--radius-sm)] bg-[var(--color-canvas-subtle)] p-0.5">
-          <ProjectTabButton active={tab === "files"} onClick={() => setTab("files")}>
+          <ProjectTabButton active={tab === "files"} onClick={() => void setTab("files")}>
             文件
           </ProjectTabButton>
-          <ProjectTabButton active={tab === "changes"} onClick={() => setTab("changes")}>
+          <ProjectTabButton active={tab === "changes"} onClick={() => void setTab("changes")}>
             变更
           </ProjectTabButton>
-          <ProjectTabButton active={tab === "history"} onClick={() => setTab("history")}>
+          <ProjectTabButton active={tab === "history"} onClick={() => void setTab("history")}>
             历史
           </ProjectTabButton>
         </div>
@@ -497,7 +511,7 @@ export default function ProjectPage() {
               <button
                 type="button"
                 disabled={selected.size === 0 || !!blocked || projectMissing}
-                onClick={openCommitFlow}
+                onClick={() => void openCommitFlow()}
                 className="ml-auto rounded-full bg-[var(--color-accent)] text-[var(--color-canvas)] px-2 py-1 text-xs font-medium disabled:opacity-40"
               >
                 保存版本

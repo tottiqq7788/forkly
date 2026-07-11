@@ -6,6 +6,7 @@
 
 # Node
 web/node_modules/
+third_party/muya/node_modules/
 web/dist/
 web/*.tsbuildinfo
 

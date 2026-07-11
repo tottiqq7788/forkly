@@ -125,7 +125,7 @@ export function MarkdownPreviewView({
   );
 
   return (
-    <div className="forkly-markdown" ref={rootRef}>
+    <div className="forkly-markdown forkly-markdown-preview" ref={rootRef}>
       {matter ? (
         <details className="forkly-md-frontmatter">
           <summary>文档信息</summary>

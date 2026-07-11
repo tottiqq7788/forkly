@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CaretRight, File as FileIcon, FolderSimple, LinkSimple } from "@phosphor-icons/react";
 import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
 import { FilePreviewView } from "./FilePreviewView";
+import { useMarkdownSaveGuard } from "./markdown/MarkdownSaveGuard";
 import { isGitMetaPath, parentDirsOf } from "./markdown/markdownPath";
 
 type Props = {
@@ -45,6 +46,7 @@ export function ProjectFilesPanel({
   // prop. Ignore the old preferredPath during that short hand-off, otherwise
   // the highlight visibly jumps old → new → old → new.
   const pendingPathChange = useRef("");
+  const { flush: flushMarkdown } = useMarkdownSaveGuard();
 
   const expanded = expandedBySource[source];
   const activePath = selection[source].path;
@@ -199,21 +201,35 @@ export function ProjectFilesPanel({
     enabled: !!activePath,
   });
 
-  function selectFile(path: string) {
+  async function selectFile(path: string) {
+    if (path === activePath) return;
+    const ok = await flushMarkdown();
+    if (!ok) return;
     setPendingFragment("");
     if (onPathChange) pendingPathChange.current = path;
     setSelection((prev) => ({ ...prev, [source]: { path } }));
     onPathChange?.(path);
   }
 
-  function openFromMarkdown(path: string, fragment?: string) {
+  async function openFromMarkdown(path: string, fragment?: string) {
     if (isGitMetaPath(path)) return;
+    if (path !== activePath) {
+      const ok = await flushMarkdown();
+      if (!ok) return;
+    }
     const parents = parentDirsOf(path);
     if (parents.length > 0) expandDirs(parents);
     setPendingFragment(fragment || "");
     if (onPathChange) pendingPathChange.current = path;
     setSelection((prev) => ({ ...prev, [source]: { path } }));
     onPathChange?.(path);
+  }
+
+  async function switchSource(next: BrowseSource) {
+    if (next === source) return;
+    const ok = await flushMarkdown();
+    if (!ok) return;
+    setSource(next);
   }
 
   function toggleDir(path: string) {
@@ -229,10 +245,10 @@ export function ProjectFilesPanel({
     <div className="flex flex-1 min-h-0">
       <section className="w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
         <div className="p-2 border-b border-[var(--color-border)] flex gap-1">
-          <SourceButton active={source === "worktree"} onClick={() => setSource("worktree")}>
+          <SourceButton active={source === "worktree"} onClick={() => void switchSource("worktree")}>
             目录
           </SourceButton>
-          <SourceButton active={source === "head"} onClick={() => setSource("head")}>
+          <SourceButton active={source === "head"} onClick={() => void switchSource("head")}>
             版本
           </SourceButton>
         </div>
@@ -394,7 +410,7 @@ function TreeNode({
   onToggleDir: (path: string) => void;
   onExpandDirs: (paths: string[]) => void;
   onEntriesLoaded: (dirPath: string, entries: TreeEntry[]) => void;
-  onSelectFile: (path: string) => void;
+  onSelectFile: (path: string) => void | Promise<void>;
 }) {
   const isDir = entry.kind === "dir";
   const isOpen = isDir && expanded.has(entry.path);

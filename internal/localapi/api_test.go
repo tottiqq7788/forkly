@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -997,6 +999,161 @@ func TestBrowseTreeAndContentAPI(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 400 {
 		t.Fatalf("escape content %d", res.StatusCode)
+	}
+}
+
+func TestContentPutAndAssetAPI(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	dataDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+	csrf := readCSRF(client, base)
+
+	repo := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("add %d", res.StatusCode)
+	}
+	id, _ := proj["id"].(string)
+
+	if err := os.WriteFile(filepath.Join(repo, "note.md"), []byte("# old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/content?source=worktree&path=note.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fc struct {
+		Content  string `json:"content"`
+		Revision string `json:"revision"`
+		Editable bool   `json:"editable"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&fc)
+	res.Body.Close()
+	if res.StatusCode != 200 || !fc.Editable || fc.Revision == "" {
+		t.Fatalf("get content status=%d editable=%v rev=%q", res.StatusCode, fc.Editable, fc.Revision)
+	}
+
+	// Stale revision → 409
+	badBody, _ := json.Marshal(map[string]any{"path": "note.md", "content": "x\n", "revision": "deadbeef"})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/projects/"+id+"/content", bytes.NewReader(badBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conflict map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&conflict)
+	res.Body.Close()
+	if res.StatusCode != 409 || conflict["code"] != "content_conflict" {
+		t.Fatalf("conflict status=%d body=%v", res.StatusCode, conflict)
+	}
+
+	putBody, _ := json.Marshal(map[string]any{"path": "note.md", "content": "# new\n", "revision": fc.Revision})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/projects/"+id+"/content", bytes.NewReader(putBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var putRes map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&putRes)
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("put %d %v", res.StatusCode, putRes)
+	}
+	got, _ := os.ReadFile(filepath.Join(repo, "note.md"))
+	if string(got) != "# new\n" {
+		t.Fatalf("disk=%q", got)
+	}
+
+	// CSRF required for PUT
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/projects/"+id+"/content", bytes.NewReader(putBody))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Fatalf("put without csrf %d", res.StatusCode)
+	}
+
+	png := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3}
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("path", "note.md")
+	part, err := w.CreateFormFile("file", "pic.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(png); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/assets", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assetRes struct {
+		RelativePath string `json:"relativePath"`
+		Path         string `json:"path"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&assetRes)
+	res.Body.Close()
+	if res.StatusCode != 201 || assetRes.RelativePath != "assets/pic.png" {
+		t.Fatalf("asset upload %d %+v", res.StatusCode, assetRes)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/asset?source=worktree&path=" + assetRes.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "image/png" || !bytes.Equal(data, png) {
+		t.Fatalf("asset get status=%d ct=%s len=%d", res.StatusCode, res.Header.Get("Content-Type"), len(data))
+	}
+
+	// HEAD worktree content is not editable via PUT (source ignored — write is always worktree path)
+	req, _ = http.NewRequest(http.MethodHead, base+"/local-api/v1/projects/"+id+"/content?source=worktree&path=note.md", nil)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("head content %d", res.StatusCode)
 	}
 }
 
