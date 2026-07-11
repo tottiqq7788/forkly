@@ -162,14 +162,15 @@ export default function HomePage() {
         <StatCard label="项目总数" value={overview.projectCount} loading={projectsQ.isLoading} />
         <StatCard
           label="版本总数"
-          value={activityQ.data?.totalCommits ?? 0}
+          value={activityQ.isError ? "—" : (activityQ.data?.totalCommits ?? 0)}
           loading={activityQ.isLoading}
           hint={activityQ.isError ? "提交统计暂不可用" : undefined}
         />
         <StatCard
           label="近 30 天新增版本"
-          value={activityQ.data?.recentCommits ?? 0}
+          value={activityQ.isError ? "—" : (activityQ.data?.recentCommits ?? 0)}
           loading={activityQ.isLoading}
+          hint={activityQ.isError ? "提交统计暂不可用" : undefined}
         />
         <StatCard label="待保存文件" value={overview.pendingFiles} loading={projectsQ.isLoading} />
       </div>

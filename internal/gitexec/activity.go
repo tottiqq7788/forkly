@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// Cap daily-series log lines so a pathological repo cannot OOM the dashboard.
+const activityLogMaxCount = 10000
+
 // RepoActivity is commit activity for a single repository.
 type RepoActivity struct {
 	TotalCommits  int            `json:"totalCommits"`
@@ -25,9 +28,16 @@ func (e *Executor) CountCommits(ctx context.Context, repo string) (int, error) {
 	if !health.HasHead {
 		return 0, nil
 	}
+	return e.revListCount(ctx, repo, nil)
+}
+
+func (e *Executor) revListCount(ctx context.Context, repo string, extraArgs []string) (int, error) {
+	args := []string{"rev-list", "--count"}
+	args = append(args, extraArgs...)
+	args = append(args, "HEAD")
 	res, err := e.Run(ctx, RunOpts{
 		Repo:    repo,
-		Args:    []string{"rev-list", "--count", "HEAD"},
+		Args:    args,
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
@@ -48,7 +58,15 @@ func (e *Executor) RecentCommitActivity(ctx context.Context, repo string, days i
 	}
 	out := RepoActivity{ByDay: map[string]int{}}
 
-	total, err := e.CountCommits(ctx, repo)
+	health, err := e.Health(ctx, repo)
+	if err != nil {
+		return out, err
+	}
+	if !health.HasHead {
+		return out, nil
+	}
+
+	total, err := e.revListCount(ctx, repo, nil)
 	if err != nil {
 		return out, err
 	}
@@ -62,12 +80,22 @@ func (e *Executor) RecentCommitActivity(ctx context.Context, repo string, days i
 	startDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
 	since := startDay.Format(time.RFC3339)
 
+	recent, err := e.revListCount(ctx, repo, []string{"--since=" + since})
+	if err != nil {
+		return out, err
+	}
+	out.RecentCommits = recent
+	if recent == 0 {
+		return out, nil
+	}
+
 	res, err := e.Run(ctx, RunOpts{
 		Repo: repo,
 		Args: []string{
 			"log",
 			"--since=" + since,
 			"--format=%aI",
+			fmt.Sprintf("--max-count=%d", activityLogMaxCount),
 			"HEAD",
 		},
 		Timeout: 45 * time.Second,
@@ -96,7 +124,6 @@ func (e *Executor) RecentCommitActivity(ctx context.Context, repo string, days i
 		}
 		key := day.Format("2006-01-02")
 		out.ByDay[key]++
-		out.RecentCommits++
 	}
 	return out, nil
 }

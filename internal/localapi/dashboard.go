@@ -100,7 +100,7 @@ func (s *Server) handleDashboardActivity(w http.ResponseWriter, r *http.Request)
 	wg.Wait()
 
 	if err := r.Context().Err(); err != nil {
-		writeErr(w, http.StatusRequestTimeout, err.Error())
+		writeErr(w, http.StatusRequestTimeout, "统计超时，请稍后重试")
 		return
 	}
 
