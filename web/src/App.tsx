@@ -11,6 +11,7 @@ export default function App() {
   const location = useLocation();
   const showAddDrawer =
     location.pathname === "/add" || new URLSearchParams(location.search).get("drawer") === "add";
+  const isProjectRoute = location.pathname.startsWith("/projects/");
 
   const me = useQuery({
     queryKey: ["me"],
@@ -57,7 +58,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-hidden">
       <aside className="w-20 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-canvas-subtle)] flex flex-col overflow-hidden">
         <div className="h-12 shrink-0 flex items-center justify-center px-0">
           <div className="whitespace-nowrap font-semibold tracking-tight text-[var(--color-text)]">Forkly</div>
@@ -76,7 +77,11 @@ export default function App() {
           </SideLink>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 overflow-auto">
+      <main
+        className={`flex-1 min-w-0 min-h-0 ${
+          isProjectRoute ? "overflow-hidden" : "overflow-auto"
+        }`}
+      >
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/add" element={<HomePage />} />

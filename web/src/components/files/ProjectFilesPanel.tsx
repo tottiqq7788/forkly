@@ -41,6 +41,10 @@ export function ProjectFilesPanel({
   const [loadedDirs, setLoadedDirs] = useState<Record<string, TreeEntry[]>>({});
   const [pendingFragment, setPendingFragment] = useState("");
   const knownBranchKey = useRef("");
+  // A local click updates selection before React Router delivers the new URL
+  // prop. Ignore the old preferredPath during that short hand-off, otherwise
+  // the highlight visibly jumps old → new → old → new.
+  const pendingPathChange = useRef("");
 
   const expanded = expandedBySource[source];
   const activePath = selection[source].path;
@@ -51,6 +55,7 @@ export function ProjectFilesPanel({
     setSelection({ worktree: { path: "" }, head: { path: "" } });
     setSource("worktree");
     setLoadedDirs({});
+    pendingPathChange.current = "";
   }, [projectID]);
 
   useEffect(() => {
@@ -65,6 +70,7 @@ export function ProjectFilesPanel({
     setExpandedBySource(emptyExpandedBySource());
     setSelection({ worktree: { path: "" }, head: { path: "" } });
     setLoadedDirs({});
+    pendingPathChange.current = "";
   }, [branchKey]);
 
   useEffect(() => {
@@ -140,6 +146,19 @@ export function ProjectFilesPanel({
     if (rootQuery.isLoading || rootQuery.isError) return;
     if (emptyHead && source === "head") return;
 
+    const pendingPath = pendingPathChange.current;
+    if (pendingPath) {
+      if (preferredPath === pendingPath) {
+        // Router caught up with the click; normal URL syncing can resume.
+        pendingPathChange.current = "";
+      } else if (activePath === pendingPath) {
+        // preferredPath is still the previous URL value. Do not paint it.
+        return;
+      } else {
+        pendingPathChange.current = "";
+      }
+    }
+
     if (preferredPath) {
       const preferredKnown = pathKnownInTree(preferredPath, loadedDirs);
       if (preferredKnown === "unknown") return;
@@ -182,6 +201,7 @@ export function ProjectFilesPanel({
 
   function selectFile(path: string) {
     setPendingFragment("");
+    if (onPathChange) pendingPathChange.current = path;
     setSelection((prev) => ({ ...prev, [source]: { path } }));
     onPathChange?.(path);
   }
@@ -191,6 +211,7 @@ export function ProjectFilesPanel({
     const parents = parentDirsOf(path);
     if (parents.length > 0) expandDirs(parents);
     setPendingFragment(fragment || "");
+    if (onPathChange) pendingPathChange.current = path;
     setSelection((prev) => ({ ...prev, [source]: { path } }));
     onPathChange?.(path);
   }
@@ -258,27 +279,32 @@ export function ProjectFilesPanel({
         </div>
       </section>
 
-      <section className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 scrollbar-none">
-        {!activePath && (
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            {emptyHead && source === "head" ? "当前分支还没有任何提交" : "选择一个文件查看内容"}
-          </p>
-        )}
-        {activePath && preview.isLoading && (
-          <p className="text-sm text-[var(--color-text-secondary)]">加载预览…</p>
-        )}
-        {activePath && preview.isError && (
-          <p className="text-sm text-[var(--color-error-fg)]">{(preview.error as Error).message}</p>
-        )}
-        {activePath && preview.data && (
-          <FilePreviewView
-            file={preview.data}
-            projectID={projectID}
-            onOpenPath={openFromMarkdown}
-            pendingFragment={pendingFragment}
-            onFragmentConsumed={() => setPendingFragment("")}
-          />
-        )}
+      <section className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
+        {/* Shift the native scrollbar beyond the clipped pane as a WebKit fallback. */}
+        <div className="absolute inset-y-0 left-0 right-[-24px] overflow-y-auto overflow-x-hidden scrollbar-none">
+          <div className="min-h-full p-4 pr-10">
+            {!activePath && (
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                {emptyHead && source === "head" ? "当前分支还没有任何提交" : "选择一个文件查看内容"}
+              </p>
+            )}
+            {activePath && preview.isLoading && (
+              <p className="text-sm text-[var(--color-text-secondary)]">加载预览…</p>
+            )}
+            {activePath && preview.isError && (
+              <p className="text-sm text-[var(--color-error-fg)]">{(preview.error as Error).message}</p>
+            )}
+            {activePath && preview.data && (
+              <FilePreviewView
+                file={preview.data}
+                projectID={projectID}
+                onOpenPath={openFromMarkdown}
+                pendingFragment={pendingFragment}
+                onFragmentConsumed={() => setPendingFragment("")}
+              />
+            )}
+          </div>
+        </div>
       </section>
     </div>
   );

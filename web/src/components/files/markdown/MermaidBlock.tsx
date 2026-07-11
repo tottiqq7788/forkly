@@ -48,6 +48,14 @@ export function MermaidBlock({ code }: Props) {
     let timer = 0;
 
     async function run() {
+      // Mermaid v11 appends a temporary measure node to body when no host is
+      // given; that briefly grows document scroll height and flashes a
+      // scrollbar. A fixed off-screen host keeps measurement without layout impact.
+      const host = document.createElement("div");
+      host.setAttribute("aria-hidden", "true");
+      host.style.cssText =
+        "position:fixed;left:-9999px;top:0;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;";
+      document.body.appendChild(host);
       try {
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
@@ -56,12 +64,14 @@ export function MermaidBlock({ code }: Props) {
           theme: forklyTheme(),
         });
         const id = `forkly-mermaid-${reactId}-${Math.random().toString(36).slice(2, 8)}`;
-        const { svg } = await mermaid.render(id, code);
+        const { svg } = await mermaid.render(id, code, host);
         if (cancelled.current) return;
         setHtml(sanitizeMermaidSvg(svg));
       } catch (e) {
         if (cancelled.current) return;
         setError(e instanceof Error ? e.message : "图表渲染失败");
+      } finally {
+        host.remove();
       }
     }
 
