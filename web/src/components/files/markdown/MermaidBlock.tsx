@@ -50,11 +50,25 @@ export function MermaidBlock({ code }: Props) {
     async function run() {
       // Mermaid v11 appends a temporary measure node to body when no host is
       // given; that briefly grows document scroll height and flashes a
-      // scrollbar. A fixed off-screen host keeps measurement without layout impact.
+      // scrollbar. A fixed off-screen host keeps measurement without layout
+      // impact. Gantt (and some other diagrams) read parent.offsetWidth, so
+      // the host must have a real width — zero-size hosts yield empty SVGs.
       const host = document.createElement("div");
       host.setAttribute("aria-hidden", "true");
-      host.style.cssText =
-        "position:fixed;left:-9999px;top:0;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;";
+      const measureWidth = Math.max(
+        640,
+        Math.min(1200, Math.floor(window.innerWidth || 800) - 48),
+      );
+      host.style.cssText = [
+        "position:fixed",
+        "left:-9999px",
+        "top:0",
+        "visibility:hidden",
+        "pointer-events:none",
+        `width:${measureWidth}px`,
+        "height:auto",
+        "overflow:hidden",
+      ].join(";");
       document.body.appendChild(host);
       try {
         const mermaid = (await import("mermaid")).default;

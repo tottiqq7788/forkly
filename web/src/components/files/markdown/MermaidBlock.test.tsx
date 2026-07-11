@@ -34,6 +34,8 @@ describe("MermaidBlock", () => {
     expect(renderMock).toHaveBeenCalled();
     const host = renderMock.mock.calls[0]?.[2] as HTMLElement | undefined;
     expect(host).toBeInstanceOf(HTMLElement);
+    // Gantt reads parent.offsetWidth; host must not be zero-sized.
+    expect(parseInt(host!.style.width, 10)).toBeGreaterThan(0);
     // Host must be removed after render so it cannot grow document scroll height.
     expect(document.body.contains(host!)).toBe(false);
   });
