@@ -132,6 +132,10 @@ export default function ProjectPage() {
   function openCommitFlow() {
     setErr("");
     if (me.isLoading) return;
+    if (me.isError) {
+      setErr("无法确认提交身份，请刷新后重试");
+      return;
+    }
     if (me.data?.identityConfigured === false) {
       setIdentityName("");
       setIdentityEmail("");

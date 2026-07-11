@@ -30,14 +30,23 @@ export default function SettingsPage() {
   }, [data]);
 
   const save = useMutation({
-    mutationFn: () =>
-      api("/local-api/v1/settings", {
+    mutationFn: () => {
+      const trimmedName = name.trim();
+      const trimmedEmail = email.trim();
+      if (!trimmedName || !trimmedEmail) {
+        throw new Error("名称和邮箱不能为空");
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        throw new Error("邮箱格式不正确");
+      }
+      return api("/local-api/v1/settings", {
         method: "PUT",
         body: JSON.stringify({
-          identity: { name, email },
+          identity: { name: trimmedName, email: trimmedEmail },
           preferences: { theme, backgroundChecks: data?.preferences.backgroundChecks ?? true },
         }),
-      }),
+      });
+    },
     onSuccess: async () => {
       applyTheme(theme);
       setMsg("已保存");
@@ -99,7 +108,7 @@ export default function SettingsPage() {
 
       <section>
         <h2 className="font-medium mb-1">关于</h2>
-        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.7 · 本地可视化 Git</p>
+        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.8 · 本地可视化 Git</p>
       </section>
 
       <div className="flex items-center gap-3">

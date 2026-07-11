@@ -265,6 +265,11 @@ func (s *Service) Relocate(id, newPath string) error {
 		return fmt.Errorf("新路径不是 Git 仓库")
 	}
 	return s.store.Save(func(f *config.File) error {
+		for _, existing := range f.Projects {
+			if existing.ID != id && samePath(existing.Path, newPath) {
+				return fmt.Errorf("该文件夹已在项目列表中")
+			}
+		}
 		for i := range f.Projects {
 			if f.Projects[i].ID == id {
 				f.Projects[i].Path = newPath

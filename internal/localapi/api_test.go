@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/forkly-app/forkly/internal/app"
+	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/session"
 )
@@ -54,8 +55,23 @@ func TestLocalAPIFlow(t *testing.T) {
 
 	repo := t.TempDir()
 	csrf := readCSRF(client, base)
+	identBody, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "Test User", "email": "test@example.com"},
+	})
+	req, _ := http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(identBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("settings identity %d", res.StatusCode)
+	}
+
 	body, _ := json.Marshal(map[string]any{"path": repo, "init": true})
-	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(session.CSRFHeader, csrf)
 	res, err = client.Do(req)
@@ -288,10 +304,25 @@ func TestDashboardActivity(t *testing.T) {
 
 	csrf := readCSRF(client, base)
 
+	identBody, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "Dash User", "email": "dash@example.com"},
+	})
+	req, _ := http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(identBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("settings identity %d", res.StatusCode)
+	}
+
 	// Create a project then delete its directory to simulate unavailable.
 	parent := t.TempDir()
 	body, _ := json.Marshal(map[string]any{"path": parent, "name": "will-delete", "create": true, "init": true})
-	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(session.CSRFHeader, csrf)
 	res, err = client.Do(req)
@@ -475,6 +506,22 @@ func TestProjectLifecycleAndIdentity(t *testing.T) {
 		t.Fatal("expected identityConfigured after settings")
 	}
 
+	// Empty identity must be rejected.
+	emptyIdent, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "  ", "email": ""},
+	})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(emptyIdent))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("empty identity should be 400, got %d", res.StatusCode)
+	}
+
 	repo := t.TempDir()
 	body, _ = json.Marshal(map[string]any{"path": repo, "init": true})
 	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
@@ -491,6 +538,67 @@ func TestProjectLifecycleAndIdentity(t *testing.T) {
 		t.Fatalf("add %d", res.StatusCode)
 	}
 	id, _ := proj["id"].(string)
+
+	// Reset to placeholder and ensure commit is rejected.
+	placeholder, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{
+			"name":  config.DefaultIdentityName,
+			"email": config.DefaultIdentityEmail,
+		},
+	})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(placeholder))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("reset placeholder %d", res.StatusCode)
+	}
+	os.WriteFile(filepath.Join(repo, "blocked.txt"), []byte("x\n"), 0o644)
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blockedSt struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&blockedSt)
+	res.Body.Close()
+	blockedCommit, _ := json.Marshal(map[string]any{
+		"paths":       []string{"blocked.txt"},
+		"message":     "should fail",
+		"fingerprint": blockedSt.Fingerprint,
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/commit", bytes.NewReader(blockedCommit))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("commit without identity should be 400, got %d", res.StatusCode)
+	}
+
+	// Restore real identity for remaining lifecycle checks.
+	body, _ = json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "Alice", "email": "alice@example.com"},
+	})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("restore identity %d", res.StatusCode)
+	}
 
 	// Legacy global reveal route must be gone.
 	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/reveal", bytes.NewReader([]byte(`{"path":"/tmp"}`)))
@@ -577,6 +685,43 @@ func TestProjectLifecycleAndIdentity(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("relocate %d", res.StatusCode)
 	}
+
+	// Relocate onto another registered project's path must fail.
+	otherRepo := t.TempDir()
+	body, _ = json.Marshal(map[string]any{"path": otherRepo, "init": true})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var otherProj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&otherProj)
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("add other project %d", res.StatusCode)
+	}
+	otherID, _ := otherProj["id"].(string)
+	body, _ = json.Marshal(map[string]any{"path": otherRepo})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/relocate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("duplicate relocate should be 400, got %d", res.StatusCode)
+	}
+	req, _ = http.NewRequest(http.MethodDelete, base+"/local-api/v1/projects/"+otherID, nil)
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
 
 	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/status")
 	if err != nil {

@@ -295,6 +295,10 @@ func (s *Server) handleCommit(id string, p config.ProjectEntry) http.HandlerFunc
 			return
 		}
 		ident := s.deps.Store.Snapshot().Identity
+		if !config.IdentityConfigured(ident) {
+			writeErr(w, http.StatusBadRequest, "请先配置提交身份（名称与邮箱）")
+			return
+		}
 		res, err := s.deps.Git.Commit(r.Context(), p.Path, gitexec.CommitRequest{
 			Paths: body.Paths, Message: body.Message, Fingerprint: body.Fingerprint,
 			AuthorName: ident.Name, AuthorEmail: ident.Email,
@@ -339,6 +343,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			if err := decodeJSON(r, &body); err != nil {
 				writeErr(w, http.StatusBadRequest, "请求无效")
 				return
+			}
+			if body.Identity != nil {
+				body.Identity.Name = strings.TrimSpace(body.Identity.Name)
+				body.Identity.Email = strings.TrimSpace(body.Identity.Email)
+				if body.Identity.Name == "" || body.Identity.Email == "" {
+					writeErr(w, http.StatusBadRequest, "名称和邮箱不能为空")
+					return
+				}
 			}
 			err := s.deps.Store.Save(func(f *config.File) error {
 				if body.Identity != nil {
