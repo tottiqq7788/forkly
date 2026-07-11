@@ -36,9 +36,41 @@ export type StatusSnapshot = {
     branch: string;
     detached: boolean;
     blockers: string[];
+    mergeInProgress?: boolean;
+    rebaseInProgress?: boolean;
+    cherryPick?: boolean;
+    revert?: boolean;
+    indexLocked?: boolean;
   };
   files: FileStatus[];
   fingerprint: string;
+};
+
+export type BranchInfo = {
+  name: string;
+  current: boolean;
+  short?: string;
+  subject?: string;
+  date?: string;
+  isUnborn?: boolean;
+};
+
+export type BranchList = {
+  current: string;
+  detached: boolean;
+  hasHead: boolean;
+  branches: BranchInfo[];
+  dirty: boolean;
+  fileCount: number;
+  blockers?: string[];
+  canSwitch: boolean;
+  canMutate: boolean;
+};
+
+export type BranchResult = {
+  ok: boolean;
+  branch: string;
+  status: StatusSnapshot;
 };
 
 export type DiffResult = {

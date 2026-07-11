@@ -40,6 +40,35 @@ func TestCSRFRejected(t *testing.T) {
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", res.StatusCode)
 	}
+
+	csrf := readCSRF(client, base)
+	repo := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forkly-CSRF", csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("add project %d", res.StatusCode)
+	}
+	id, _ := proj["id"].(string)
+
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/branches/switch", bytes.NewReader([]byte(`{"name":"main"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("branch switch without CSRF expected 403, got %d", res.StatusCode)
+	}
 }
 
 func TestForbiddenHostPrefixBypass(t *testing.T) {

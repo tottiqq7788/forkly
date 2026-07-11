@@ -350,6 +350,128 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		})(w, r)
+	case "branches":
+		s.handleBranches(w, r, id, p, parts)
+	default:
+		writeErr(w, http.StatusNotFound, "not found")
+	}
+}
+
+func (s *Server) rewatchProject(id, path string) {
+	if s.deps.Watcher == nil {
+		return
+	}
+	s.deps.Watcher.Unwatch(id)
+	_ = s.deps.Watcher.Watch(id, path)
+}
+
+func (s *Server) handleBranches(w http.ResponseWriter, r *http.Request, id string, p config.ProjectEntry, parts []string) {
+	if len(parts) == 2 {
+		if r.Method != http.MethodGet {
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		list, err := s.deps.Git.ListBranches(r.Context(), p.Path)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, list)
+		return
+	}
+	if len(parts) != 3 {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	op := parts[2]
+	switch op {
+	case "switch":
+		s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			res, err := s.deps.Git.SwitchBranch(r.Context(), p.Path, body.Name)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.rewatchProject(id, p.Path)
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusOK, res)
+		})(w, r)
+	case "create":
+		s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			res, err := s.deps.Git.CreateAndSwitchBranch(r.Context(), p.Path, body.Name)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.rewatchProject(id, p.Path)
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusOK, res)
+		})(w, r)
+	case "rename":
+		s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				OldName string `json:"oldName"`
+				NewName string `json:"newName"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			res, err := s.deps.Git.RenameBranch(r.Context(), p.Path, body.OldName, body.NewName)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusOK, res)
+		})(w, r)
+	case "delete":
+		s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			res, err := s.deps.Git.DeleteBranch(r.Context(), p.Path, body.Name)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusOK, res)
+		})(w, r)
 	default:
 		writeErr(w, http.StatusNotFound, "not found")
 	}

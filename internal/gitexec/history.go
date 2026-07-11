@@ -173,8 +173,7 @@ func parseNameStatusNumstat(data []byte) []CommitFile {
 			if fields[1] != "-" {
 				del, _ = strconv.Atoi(fields[1])
 			}
-			path := strings.Join(fields[2:], "\t")
-			path = normalizeNumstatPath(path)
+			path := normalizeNumstatPath(strings.Join(fields[2:], "\t"))
 			cf := statusMap[path]
 			cf.Path = path
 			cf.Additions = add
@@ -193,13 +192,17 @@ func parseNameStatusNumstat(data []byte) []CommitFile {
 		}
 		if strings.HasPrefix(st, "R") || strings.HasPrefix(st, "C") {
 			if len(fields) >= 3 {
-				cf := CommitFile{Status: st[:1], OldPath: fields[1], Path: fields[2]}
+				cf := CommitFile{
+					Status:  st[:1],
+					OldPath: unquoteGitPath(fields[1]),
+					Path:    unquoteGitPath(fields[2]),
+				}
 				statusMap[cf.Path] = cf
 				order = append(order, cf.Path)
 			}
 			continue
 		}
-		cf := CommitFile{Status: st[:1], Path: fields[1]}
+		cf := CommitFile{Status: st[:1], Path: unquoteGitPath(fields[1])}
 		statusMap[cf.Path] = cf
 		order = append(order, cf.Path)
 	}
@@ -251,11 +254,33 @@ func isNameStatusCode(s string) bool {
 
 func normalizeNumstatPath(path string) string {
 	path = strings.TrimSpace(path)
-	// rename: "old => new" or "{old => new}" style
-	if i := strings.LastIndex(path, " => "); i >= 0 {
-		return strings.TrimSpace(path[i+4:])
+	const sep = " => "
+	i := strings.Index(path, sep)
+	if i < 0 {
+		return unquoteGitPath(path)
 	}
-	return path
+	left := path[:i]
+	right := path[i+len(sep):]
+	open := strings.LastIndex(left, "{")
+	close := strings.Index(right, "}")
+	if open >= 0 && close >= 0 {
+		prefix := left[:open]
+		name := right[:close]
+		suffix := right[close+1:]
+		return unquoteGitPath(prefix+name+suffix)
+	}
+	return unquoteGitPath(right)
+}
+
+// unquoteGitPath decodes git's C-quoted paths ("\346\234\252...") when core.quotepath=true.
+func unquoteGitPath(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		if u, err := strconv.Unquote(s); err == nil {
+			return u
+		}
+	}
+	return s
 }
 
 func (e *Executor) DiffCommitFile(ctx context.Context, repo, sha, path string) (DiffResult, error) {

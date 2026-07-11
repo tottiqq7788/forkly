@@ -35,13 +35,22 @@ export default function App() {
           <h1 className="text-xl font-semibold mb-2">
             {isDev && apiDown ? "本地 API 未启动" : isDev ? "无法建立开发会话" : "需要从菜单栏打开"}
           </h1>
-          <p className="text-[var(--color-text-secondary)]">
+          <p className="text-[var(--color-text-secondary)] mb-4">
             {isDev && apiDown
               ? "请在另一个终端执行：FORKLY_DEV=1 go run ./cmd/forkly，然后刷新本页。"
               : isDev
                 ? msg
                 : "请点击菜单栏 Forkly 图标中的「打开控制台」，以建立本地会话。"}
           </p>
+          {isDev && (
+            <button
+              type="button"
+              onClick={() => void me.refetch()}
+              className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-sm font-medium"
+            >
+              重试
+            </button>
+          )}
         </div>
       </div>
     );

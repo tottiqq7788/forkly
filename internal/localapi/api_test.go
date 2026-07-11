@@ -246,6 +246,46 @@ func TestDevLogin(t *testing.T) {
 	}
 }
 
+func TestDevModeAutoSessionAfterStaleCookie(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addr, shutdown, _, err := app.RunServerOnlyWith(ctx, log, app.ServerOnlyOptions{
+		DataDir: t.TempDir(),
+		Listen:  "127.0.0.1:0",
+		DevMode: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	req, _ := http.NewRequest(http.MethodGet, addr+"/local-api/v1/session/me", nil)
+	req.AddCookie(&http.Cookie{Name: session.CookieName, Value: "stale-session-id-after-restart"})
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("expected auto session in DevMode, got %d", res.StatusCode)
+	}
+	foundSession := false
+	for _, c := range res.Cookies() {
+		if c.Name == session.CookieName && c.Value != "" && c.Value != "stale-session-id-after-restart" {
+			foundSession = true
+		}
+	}
+	if !foundSession {
+		t.Fatal("expected Set-Cookie with new forkly_session")
+	}
+}
+
 func TestDevLoginDisabled(t *testing.T) {
 	log, err := diagnostics.NewLogger()
 	if err != nil {
@@ -957,5 +997,205 @@ func TestBrowseTreeAndContentAPI(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 400 {
 		t.Fatalf("escape content %d", res.StatusCode)
+	}
+}
+
+func TestBranchAPIFlow(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+	csrf := readCSRF(client, base)
+
+	identBody, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "Branch User", "email": "branch@example.com"},
+	})
+	req, _ := http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(identBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("settings %d", res.StatusCode)
+	}
+
+	repo := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("add %d", res.StatusCode)
+	}
+	id, _ := proj["id"].(string)
+
+	if err := os.WriteFile(filepath.Join(repo, "note.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitBody, _ := json.Marshal(map[string]any{
+		"paths": []string{"note.txt"}, "message": "first", "fingerprint": "",
+	})
+	// fingerprint required - get status first
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&st)
+	res.Body.Close()
+	fp, _ := st["fingerprint"].(string)
+	commitBody, _ = json.Marshal(map[string]any{
+		"paths": []string{"note.txt"}, "message": "first", "fingerprint": fp,
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/commit", bytes.NewReader(commitBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("commit %d", res.StatusCode)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/branches")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Current   string `json:"current"`
+		CanSwitch bool   `json:"canSwitch"`
+		Branches  []struct {
+			Name string `json:"name"`
+		} `json:"branches"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&list)
+	res.Body.Close()
+	if res.StatusCode != 200 || !list.CanSwitch || list.Current == "" {
+		t.Fatalf("list branches status=%d %#v", res.StatusCode, list)
+	}
+
+	createBody, _ := json.Marshal(map[string]any{"name": "feature/api"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/branches/create", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		OK     bool   `json:"ok"`
+		Branch string `json:"branch"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&created)
+	res.Body.Close()
+	if res.StatusCode != 200 || !created.OK || created.Branch != "feature/api" {
+		t.Fatalf("create %#v status=%d", created, res.StatusCode)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statusAfter struct {
+		Health struct {
+			Branch string `json:"branch"`
+		} `json:"health"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&statusAfter)
+	res.Body.Close()
+	if statusAfter.Health.Branch != "feature/api" {
+		t.Fatalf("status branch %q", statusAfter.Health.Branch)
+	}
+
+	switchBody, _ := json.Marshal(map[string]any{"name": list.Current})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/branches/switch", bytes.NewReader(switchBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("switch %d", res.StatusCode)
+	}
+
+	renameBody, _ := json.Marshal(map[string]any{"oldName": "feature/api", "newName": "feature/done"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/branches/rename", bytes.NewReader(renameBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("rename %d", res.StatusCode)
+	}
+
+	delBody, _ := json.Marshal(map[string]any{"name": "feature/done"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/branches/delete", bytes.NewReader(delBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("delete %d", res.StatusCode)
+	}
+
+	// Unauthenticated list
+	res, err = http.Get(base + "/local-api/v1/projects/" + id + "/branches")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("unauth branches %d", res.StatusCode)
+	}
+
+	// Dirty worktree blocks switch
+	if err := os.WriteFile(filepath.Join(repo, "note.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	createBody, _ = json.Marshal(map[string]any{"name": "blocked"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/branches/create", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("dirty create should 400, got %d", res.StatusCode)
 	}
 }

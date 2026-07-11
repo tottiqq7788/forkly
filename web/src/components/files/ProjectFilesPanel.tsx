@@ -7,6 +7,7 @@ import { FilePreviewView } from "./FilePreviewView";
 type Props = {
   projectID: string;
   projectName: string;
+  branchKey?: string;
 };
 
 type SourceSelection = {
@@ -20,7 +21,7 @@ function emptyExpandedBySource(): Record<BrowseSource, Set<string>> {
   };
 }
 
-export function ProjectFilesPanel({ projectID, projectName }: Props) {
+export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Props) {
   const [source, setSource] = useState<BrowseSource>("worktree");
   const [expandedBySource, setExpandedBySource] = useState(emptyExpandedBySource);
   const [selection, setSelection] = useState<Record<BrowseSource, SourceSelection>>({
@@ -34,7 +35,8 @@ export function ProjectFilesPanel({ projectID, projectName }: Props) {
   useEffect(() => {
     setExpandedBySource(emptyExpandedBySource());
     setSelection({ worktree: { path: "" }, head: { path: "" } });
-  }, [projectID]);
+    setSource("worktree");
+  }, [projectID, branchKey]);
 
   const expandDirs = useCallback(
     (paths: string[]) => {

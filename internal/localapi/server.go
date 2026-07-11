@@ -185,8 +185,15 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := s.deps.Sessions.FromRequest(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "未登录本地会话")
-			return
+			// DevMode: API restarts wipe in-memory sessions; mint a new one so
+			// Vite refresh after go run doesn't strand the UI on 401.
+			if s.deps.DevMode {
+				sess = s.deps.Sessions.Create()
+				s.deps.Sessions.SetCookies(w, sess)
+			} else {
+				writeErr(w, http.StatusUnauthorized, "未登录本地会话")
+				return
+			}
 		}
 		ctx := context.WithValue(r.Context(), sessionKey, sess)
 		next(w, r.WithContext(ctx))

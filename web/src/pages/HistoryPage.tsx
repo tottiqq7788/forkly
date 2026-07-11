@@ -74,13 +74,9 @@ export default function HistoryPage() {
               <h2 className="text-lg font-semibold mb-2">{detail.data.commit.subject}</h2>
               <p className="text-sm text-[var(--color-text-secondary)] mb-4">
                 {detail.data.commit.author} · {formatDate(detail.data.commit.date)} ·{" "}
-                <button
-                  type="button"
-                  className="font-mono text-[var(--color-accent-muted)]"
-                  onClick={() => navigator.clipboard.writeText(detail.data!.commit.sha)}
-                >
-                  {detail.data.commit.short} 复制
-                </button>
+                <span className="font-mono text-[var(--color-accent-muted)]">
+                  {detail.data.commit.short}
+                </span>
               </p>
               <h3 className="text-sm font-medium mb-2">修改的文件</h3>
               <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-[var(--radius-lg)]">

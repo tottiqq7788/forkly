@@ -171,6 +171,49 @@ func TestParseNameStatusNumstatCounts(t *testing.T) {
 	}
 }
 
+func TestNormalizeNumstatBraceRename(t *testing.T) {
+	cases := map[string]string{
+		`未命名文件夹/{新建文1.txt => 新建文2.txt}`:                "未命名文件夹/新建文2.txt",
+		`未命名文件夹/hhhh/{新4本文件.txt => 本文件.txt}`:           "未命名文件夹/hhhh/本文件.txt",
+		`{foo => bar}/baz.txt`:                              "bar/baz.txt",
+		`dir/{a => b}.txt`:                                  "dir/b.txt",
+		`old.txt => new.txt`:                                "new.txt",
+		`"old.txt" => "new.txt"`:                            "new.txt",
+		"普通文件.txt":                                         "普通文件.txt",
+	}
+	for in, want := range cases {
+		if got := normalizeNumstatPath(in); got != want {
+			t.Fatalf("normalizeNumstatPath(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseNameStatusNumstatBraceRenameMerge(t *testing.T) {
+	raw := "" +
+		"R100\t未命名文件夹/新建文1.txt\t未命名文件夹/新建文2.txt\n" +
+		"0\t0\t未命名文件夹/{新建文1.txt => 新建文2.txt}\n" +
+		"R100\t未命名文件夹/hhhh/新4本文件.txt\t未命名文件夹/hhhh/本文件.txt\n" +
+		"0\t0\t未命名文件夹/hhhh/{新4本文件.txt => 本文件.txt}\n"
+	files := parseNameStatusNumstat([]byte(raw))
+	if len(files) != 2 {
+		t.Fatalf("files=%d %#v", len(files), files)
+	}
+	for _, f := range files {
+		if strings.Contains(f.Path, "}") || strings.Contains(f.Path, "{") {
+			t.Fatalf("path still has braces: %#v", f)
+		}
+		if f.Status != "R" {
+			t.Fatalf("want rename status, got %#v", f)
+		}
+	}
+	if files[0].Path != "未命名文件夹/新建文2.txt" || files[0].OldPath != "未命名文件夹/新建文1.txt" {
+		t.Fatalf("first %#v", files[0])
+	}
+	if files[1].Path != "未命名文件夹/hhhh/本文件.txt" {
+		t.Fatalf("second %#v", files[1])
+	}
+}
+
 func TestCommitDetailAdditions(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)

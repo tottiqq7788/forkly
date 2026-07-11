@@ -6,6 +6,7 @@ import {
   ArrowsLeftRight,
   FolderSimple,
   GearSix,
+  GitBranch,
   Minus,
   PencilSimple,
   Plus,
@@ -14,6 +15,7 @@ import {
 import { api, DiffResult, FileStatus, Project, SessionMe, StatusSnapshot } from "../api";
 import { Drawer } from "../Drawer";
 import { ProjectFilesPanel } from "../components/files/ProjectFilesPanel";
+import { BranchDrawer } from "../components/branches/BranchDrawer";
 import AddProjectPage from "./AddProjectPage";
 
 type ProjectTab = "files" | "changes" | "history";
@@ -66,6 +68,8 @@ export default function ProjectPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [hideRulesText, setHideRulesText] = useState("*.DS*");
   const [hideRulesSaved, setHideRulesSaved] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [filesBranchKey, setFilesBranchKey] = useState("");
 
   useEffect(() => {
     setFilter("all");
@@ -85,6 +89,8 @@ export default function ProjectPage() {
     setRefreshing(false);
     setHideRulesText("*.DS*");
     setHideRulesSaved(false);
+    setBranchOpen(false);
+    setFilesBranchKey("");
   }, [id]);
 
   function setTab(next: ProjectTab) {
@@ -324,6 +330,12 @@ export default function ProjectPage() {
     onError: (e: Error) => setErr(e.message),
   });
 
+  useEffect(() => {
+    const branch = status.data?.health?.branch;
+    if (!branch) return;
+    setFilesBranchKey((prev) => prev || branch);
+  }, [status.data?.health?.branch]);
+
   const health = status.data?.health;
   const blocked = health && !health.ok;
 
@@ -371,9 +383,17 @@ export default function ProjectPage() {
               <GearSix size={14} />
             </button>
           </div>
-          <div className="text-[11px] text-[var(--color-text-secondary)]">
-            当前分支：{health?.branch || "…"}
-          </div>
+          <button
+            type="button"
+            onClick={() => setBranchOpen(true)}
+            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-[var(--radius-sm)] px-1 -ml-1 text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+            title="管理分支"
+          >
+            <GitBranch size={12} className="shrink-0" />
+            <span className="truncate">
+              当前分支：{health?.detached ? "detached HEAD" : health?.branch || "…"}
+            </span>
+          </button>
         </div>
         <div className="ml-auto flex rounded-[var(--radius-sm)] bg-[var(--color-canvas-subtle)] p-0.5">
           <ProjectTabButton active={tab === "files"} onClick={() => setTab("files")}>
@@ -418,7 +438,11 @@ export default function ProjectPage() {
       )}
 
       {tab === "files" ? (
-        <ProjectFilesPanel projectID={id} projectName={project.data?.name || "项目"} />
+        <ProjectFilesPanel
+          projectID={id}
+          projectName={project.data?.name || "项目"}
+          branchKey={filesBranchKey || health?.branch || ""}
+        />
       ) : tab === "changes" ? (
         <div className="flex flex-1 min-h-0">
           <section className="w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
@@ -529,6 +553,19 @@ export default function ProjectPage() {
             </div>
           </div>
         </Drawer>
+      )}
+
+      {branchOpen && (
+        <BranchDrawer
+          projectID={id}
+          onClose={() => setBranchOpen(false)}
+          onSwitched={(nextStatus, branch) => {
+            qc.setQueryData(["status", id], nextStatus);
+            setFilesBranchKey(branch);
+            setActivePath("");
+            setSelected(new Set());
+          }}
+        />
       )}
 
       {switchOpen && (
@@ -861,13 +898,9 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
             <h2 className="text-lg font-semibold mb-2">{detail.data.commit.subject}</h2>
             <p className="text-sm text-[var(--color-text-secondary)] mb-4">
               {detail.data.commit.author} · {formatDate(detail.data.commit.date)} ·{" "}
-              <button
-                type="button"
-                className="font-mono text-[var(--color-accent-muted)]"
-                onClick={() => navigator.clipboard.writeText(detail.data!.commit.sha)}
-              >
-                {detail.data.commit.short} 复制
-              </button>
+              <span className="font-mono text-[var(--color-accent-muted)]">
+                {detail.data.commit.short}
+              </span>
             </p>
             <h3 className="text-sm font-medium mb-2">修改的文件</h3>
             <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-[var(--radius-lg)] mb-5">
