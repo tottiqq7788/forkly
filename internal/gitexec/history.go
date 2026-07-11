@@ -3,6 +3,7 @@ package gitexec
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -198,6 +199,7 @@ func (e *Executor) DiffCommitFile(ctx context.Context, repo, sha, path string) (
 	if err := assertObjectID(sha); err != nil {
 		return DiffResult{}, err
 	}
+	path = filepath.ToSlash(path)
 	if err := assertInsideRepo(repo, path); err != nil {
 		return DiffResult{}, err
 	}
@@ -211,6 +213,21 @@ func (e *Executor) DiffCommitFile(ctx context.Context, repo, sha, path string) (
 	}
 	patch := string(res.Stdout)
 	out := DiffResult{Path: path, Kind: DiffText, Patch: patch}
+	if strings.TrimSpace(patch) == "" {
+		out.Message = "该文件在此次版本中没有文本差异（可能是二进制或仅元数据变更）"
+	}
 	out.Additions, out.Deletions = countDiffStats(patch)
+	if len(patch) > MaxDiffBytes || strings.Count(patch, "\n") > MaxDiffLines {
+		lines := strings.Split(patch, "\n")
+		if len(lines) > MaxDiffLines {
+			lines = lines[:MaxDiffLines]
+		}
+		joined := strings.Join(lines, "\n")
+		if len(joined) > MaxDiffBytes {
+			joined = joined[:MaxDiffBytes]
+		}
+		out.Patch = joined
+		out.Truncated = true
+	}
 	return out, nil
 }

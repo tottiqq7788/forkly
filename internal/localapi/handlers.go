@@ -65,6 +65,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session":     sess,
 		"identity":    snap.Identity,
+		"identityConfigured": config.IdentityConfigured(snap.Identity),
 		"preferences": snap.Preferences,
 		"git": map[string]any{
 			"version": rt.Version,
@@ -231,6 +232,10 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"commit": c, "files": files})
 	case "relocate":
 		s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
 			var body struct {
 				Path string `json:"path"`
 			}
@@ -240,6 +245,31 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := s.deps.Projects.Relocate(id, body.Path); err != nil {
 				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			updated, err := s.deps.Projects.Get(id)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if s.deps.Watcher != nil {
+				s.deps.Watcher.Unwatch(id)
+				_ = s.deps.Watcher.Watch(id, updated.Path)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": updated.Path})
+		})(w, r)
+	case "reveal":
+		s.authWrite(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			if s.deps.Reveal == nil {
+				writeErr(w, http.StatusNotImplemented, "不支持")
+				return
+			}
+			if err := s.deps.Reveal.Reveal(p.Path); err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -345,27 +375,4 @@ func (s *Server) handleFolderDialog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": path})
-}
-
-func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	var body struct {
-		Path string `json:"path"`
-	}
-	if err := decodeJSON(r, &body); err != nil || body.Path == "" {
-		writeErr(w, http.StatusBadRequest, "缺少 path")
-		return
-	}
-	if s.deps.Reveal == nil {
-		writeErr(w, http.StatusNotImplemented, "不支持")
-		return
-	}
-	if err := s.deps.Reveal.Reveal(body.Path); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

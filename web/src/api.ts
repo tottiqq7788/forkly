@@ -77,7 +77,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-export type SessionMe = { git: { version: string; bundled: boolean } };
+export type SessionMe = {
+  git: { version: string; bundled: boolean };
+  identity?: { name: string; email: string };
+  identityConfigured?: boolean;
+  preferences?: { theme: string; backgroundChecks: boolean };
+};
 
 /** Load session; in Vite DEV, auto-bootstrap via /session/dev-login when no menu-bar claim. */
 export async function fetchSessionMe(): Promise<SessionMe> {

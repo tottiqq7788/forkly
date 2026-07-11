@@ -3,6 +3,7 @@ package localapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -96,4 +97,58 @@ func TestCrossOriginWriteBlocked(t *testing.T) {
 	if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated {
 		t.Fatalf("cross-origin write should be blocked, got %d", res.StatusCode)
 	}
+}
+
+func TestProjectRevealRequiresCSRF(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+	csrf := readCSRF(client, base)
+
+	repo := t.TempDir()
+	body := []byte(`{"path":` + mustJSONString(repo) + `,"init":true}`)
+	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forkly-CSRF", csrf)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	id, _ := proj["id"].(string)
+	if id == "" {
+		t.Fatal("no project id")
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/reveal", bytes.NewReader([]byte("{}")))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 without CSRF, got %d", res.StatusCode)
+	}
+}
+
+func mustJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

@@ -414,3 +414,197 @@ func TestDashboardActivity(t *testing.T) {
 		t.Fatal("expected projects")
 	}
 }
+
+func TestProjectLifecycleAndIdentity(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	dataDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+	csrf := readCSRF(client, base)
+
+	// Default identity is not configured.
+	res, err := client.Get(base + "/local-api/v1/session/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var me struct {
+		IdentityConfigured bool `json:"identityConfigured"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&me)
+	res.Body.Close()
+	if me.IdentityConfigured {
+		t.Fatal("default identity should not be configured")
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "Alice", "email": "alice@example.com"},
+	})
+	req, _ := http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("settings %d", res.StatusCode)
+	}
+	res, err = client.Get(base + "/local-api/v1/session/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(res.Body).Decode(&me)
+	res.Body.Close()
+	if !me.IdentityConfigured {
+		t.Fatal("expected identityConfigured after settings")
+	}
+
+	repo := t.TempDir()
+	body, _ = json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("add %d", res.StatusCode)
+	}
+	id, _ := proj["id"].(string)
+
+	// Legacy global reveal route must be gone.
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/reveal", bytes.NewReader([]byte(`{"path":"/tmp"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 404 {
+		t.Fatalf("legacy reveal should be 404, got %d", res.StatusCode)
+	}
+
+	// Unauthenticated project reveal.
+	res, err = http.Post(base+"/local-api/v1/projects/"+id+"/reveal", "application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("unauth reveal %d", res.StatusCode)
+	}
+
+	// Authenticated reveal without platform Reveal returns 501 in server-only mode.
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/reveal", bytes.NewReader([]byte("{}")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("reveal without platform support: %d", res.StatusCode)
+	}
+
+	// Relocate to a new git repo path.
+	newRepo := t.TempDir()
+	body, _ = json.Marshal(map[string]any{"path": newRepo, "init": true})
+	// init via add would register duplicate; init manually with git through relocate requirement
+	// Relocate requires existing git repo — create by temporarily adding then removing, or use project.Init via API.
+	// Simpler: write files and use second add with init, then remove second from list... messy.
+	// Use relocate onto a fresh inited folder created via filesystem + inspect isn't enough.
+	// Create via POST projects then DELETE leaving the git dir, then relocate first project there? 
+	// Actually: init newRepo by adding as project then deleting registration.
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj2 map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj2)
+	res.Body.Close()
+	id2, _ := proj2["id"].(string)
+	if res.StatusCode != 201 || id2 == "" {
+		t.Fatalf("add newRepo %d", res.StatusCode)
+	}
+	req, _ = http.NewRequest(http.MethodDelete, base+"/local-api/v1/projects/"+id2, nil)
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("delete temp project %d", res.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(newRepo, ".git")); err != nil {
+		t.Fatalf("git dir should remain after remove: %v", err)
+	}
+
+	body, _ = json.Marshal(map[string]any{"path": newRepo})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/relocate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("relocate %d", res.StatusCode)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		res.Body.Close()
+		t.Fatalf("status after relocate %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	// Remove original registration; disk repo remains.
+	marker := filepath.Join(newRepo, "keep.txt")
+	_ = os.WriteFile(marker, []byte("x"), 0o644)
+	req, _ = http.NewRequest(http.MethodDelete, base+"/local-api/v1/projects/"+id, nil)
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("remove %d", res.StatusCode)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("disk files should remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(newRepo, ".git")); err != nil {
+		t.Fatalf(".git should remain: %v", err)
+	}
+}

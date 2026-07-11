@@ -84,7 +84,6 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	mux.HandleFunc("/local-api/v1/projects/", s.auth(s.handleProjectSub))
 	mux.HandleFunc("/local-api/v1/settings", s.auth(s.handleSettings))
 	mux.HandleFunc("/local-api/v1/dialog/folder", s.authWrite(s.handleFolderDialog))
-	mux.HandleFunc("/local-api/v1/reveal", s.authWrite(s.handleReveal))
 	mux.Handle("/", s.static())
 
 	handler := s.securityHeaders(s.cop.Handler(mux))

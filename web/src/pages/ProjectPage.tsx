@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowClockwise, ArrowsLeftRight, FolderSimple, Minus, PencilSimple, Plus, WarningCircle } from "@phosphor-icons/react";
-import { api, DiffResult, FileStatus, Project, StatusSnapshot } from "../api";
+import {
+  ArrowClockwise,
+  ArrowsLeftRight,
+  FolderSimple,
+  GearSix,
+  Minus,
+  PencilSimple,
+  Plus,
+  WarningCircle,
+} from "@phosphor-icons/react";
+import { api, DiffResult, FileStatus, Project, SessionMe, StatusSnapshot } from "../api";
 import { Drawer } from "../Drawer";
 import AddProjectPage from "./AddProjectPage";
 
@@ -37,10 +46,17 @@ export default function ProjectPage() {
   const [commitOpen, setCommitOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [identityOpen, setIdentityOpen] = useState(false);
+  const [removeConfirm, setRemoveConfirm] = useState(false);
   const [pendingProjectID, setPendingProjectID] = useState("");
   const [switchCloseSignal, setSwitchCloseSignal] = useState(0);
   const [message, setMessage] = useState("");
   const [err, setErr] = useState("");
+  const [settingsErr, setSettingsErr] = useState("");
+  const [identityName, setIdentityName] = useState("");
+  const [identityEmail, setIdentityEmail] = useState("");
+  const [identityErr, setIdentityErr] = useState("");
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -51,9 +67,14 @@ export default function ProjectPage() {
     setCommitOpen(false);
     setSwitchOpen(false);
     setAddOpen(false);
+    setSettingsOpen(false);
+    setIdentityOpen(false);
+    setRemoveConfirm(false);
     setPendingProjectID("");
     setMessage("");
     setErr("");
+    setSettingsErr("");
+    setIdentityErr("");
     setRefreshing(false);
   }, [id]);
 
@@ -64,7 +85,7 @@ export default function ProjectPage() {
 
   const project = useQuery({
     queryKey: ["project", id],
-    queryFn: () => api<Project>(`/local-api/v1/projects/${id}`),
+    queryFn: () => api<{ id: string; name: string; path: string }>(`/local-api/v1/projects/${id}`),
   });
   const status = useQuery({
     queryKey: ["status", id],
@@ -80,6 +101,13 @@ export default function ProjectPage() {
     queryKey: ["projects"],
     queryFn: () => api<{ projects: Project[] }>("/local-api/v1/projects"),
   });
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<SessionMe>("/local-api/v1/session/me"),
+  });
+
+  const projectMeta = projectList.data?.projects.find((p) => p.id === id);
+  const projectMissing = projectMeta ? !projectMeta.exists : false;
 
   async function handleRefresh() {
     if (refreshing) return;
@@ -93,7 +121,6 @@ export default function ProjectPage() {
         activePath ? diff.refetch({ cancelRefetch: false }) : Promise.resolve(),
       ]);
     } finally {
-      // Keep spinning for at least one full rotation (1s matches animate-spin).
       const remain = 1000 - (Date.now() - started);
       if (remain > 0) {
         await new Promise((resolve) => setTimeout(resolve, remain));
@@ -101,6 +128,91 @@ export default function ProjectPage() {
       setRefreshing(false);
     }
   }
+
+  function openCommitFlow() {
+    setErr("");
+    if (me.isLoading) return;
+    if (me.data?.identityConfigured === false) {
+      setIdentityName("");
+      setIdentityEmail("");
+      setIdentityErr("");
+      setIdentityOpen(true);
+      return;
+    }
+    setCommitOpen(true);
+  }
+
+  const saveIdentity = useMutation({
+    mutationFn: () => {
+      const name = identityName.trim();
+      const email = identityEmail.trim();
+      if (!name || !email) {
+        throw new Error("请填写名称和邮箱");
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error("邮箱格式不正确");
+      }
+      return api("/local-api/v1/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          identity: { name, email },
+        }),
+      });
+    },
+    onSuccess: async () => {
+      setIdentityOpen(false);
+      await qc.invalidateQueries({ queryKey: ["me"] });
+      await qc.invalidateQueries({ queryKey: ["settings"] });
+      setCommitOpen(true);
+    },
+    onError: (e: Error) => setIdentityErr(e.message),
+  });
+
+  const revealProject = useMutation({
+    mutationFn: () => api(`/local-api/v1/projects/${id}/reveal`, { method: "POST", body: "{}" }),
+    onError: (e: Error) => setSettingsErr(e.message),
+  });
+
+  const relocateProject = useMutation({
+    mutationFn: async () => {
+      const picked = await api<{ path: string }>("/local-api/v1/dialog/folder", {
+        method: "POST",
+        body: "{}",
+      });
+      return api<{ ok: boolean; path: string }>(`/local-api/v1/projects/${id}/relocate`, {
+        method: "POST",
+        body: JSON.stringify({ path: picked.path }),
+      });
+    },
+    onSuccess: async () => {
+      setSettingsErr("");
+      setSettingsOpen(false);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["project", id] }),
+        qc.invalidateQueries({ queryKey: ["status", id] }),
+        qc.invalidateQueries({ queryKey: ["projects"] }),
+        qc.invalidateQueries({ queryKey: ["dashboard-activity"] }),
+      ]);
+    },
+    onError: (e: Error) => setSettingsErr(e.message),
+  });
+
+  const removeProject = useMutation({
+    mutationFn: () => api(`/local-api/v1/projects/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      setSettingsOpen(false);
+      setRemoveConfirm(false);
+      await qc.invalidateQueries({ queryKey: ["projects"] });
+      await qc.invalidateQueries({ queryKey: ["dashboard-activity"] });
+      const remaining = (projectList.data?.projects || []).filter((p) => p.id !== id);
+      if (remaining[0]) {
+        nav(`/projects/${remaining[0].id}`, { replace: true });
+      } else {
+        nav("/", { replace: true });
+      }
+    },
+    onError: (e: Error) => setSettingsErr(e.message),
+  });
 
   const files = useMemo(() => {
     const list = status.data?.files || [];
@@ -147,6 +259,7 @@ export default function ProjectPage() {
       await qc.invalidateQueries({ queryKey: ["status", id] });
       await qc.invalidateQueries({ queryKey: ["history", id] });
       await qc.invalidateQueries({ queryKey: ["projects"] });
+      await qc.invalidateQueries({ queryKey: ["dashboard-activity"] });
     },
     onError: (e: Error) => setErr(e.message),
   });
@@ -184,6 +297,19 @@ export default function ProjectPage() {
             >
               <ArrowClockwise size={14} className={refreshing ? "animate-spin" : undefined} />
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsErr("");
+                setRemoveConfirm(false);
+                setSettingsOpen(true);
+              }}
+              className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+              title="项目设置"
+              aria-label="项目设置"
+            >
+              <GearSix size={14} />
+            </button>
           </div>
           <div className="text-[11px] text-[var(--color-text-secondary)]">
             当前分支：{health?.branch || "…"}
@@ -198,6 +324,26 @@ export default function ProjectPage() {
           </ProjectTabButton>
         </div>
       </header>
+
+      {projectMissing && (
+        <div className="mx-4 mt-3 rounded-[var(--radius-lg)] border border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] px-4 py-3 text-sm">
+          <div className="font-medium text-[var(--color-error-fg)] mb-1">找不到项目目录</div>
+          <p className="text-[var(--color-text-secondary)] mb-3">
+            目录可能已被移动或删除。你可以重新定位到新路径，或从 Forkly 移除登记（不会删除磁盘文件）。
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsErr("");
+              setRemoveConfirm(false);
+              setSettingsOpen(true);
+            }}
+            className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-xs font-medium"
+          >
+            打开项目设置
+          </button>
+        </div>
+      )}
 
       {tab === "changes" && blocked && (
         <div className="mx-4 mt-3 rounded-[var(--radius-lg)] border border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] px-4 py-3 text-sm">
@@ -233,14 +379,11 @@ export default function ProjectPage() {
               ))}
               <button
                 type="button"
-                disabled={selected.size === 0 || !!blocked}
-                onClick={() => {
-                  setErr("");
-                  setCommitOpen(true);
-                }}
+                disabled={selected.size === 0 || !!blocked || projectMissing}
+                onClick={openCommitFlow}
                 className="ml-auto rounded-full bg-[var(--color-accent)] text-[var(--color-canvas)] px-2 py-1 text-xs font-medium disabled:opacity-40"
               >
-                提交
+                保存版本
               </button>
             </div>
             <div className="overflow-auto flex-1 py-1">
@@ -389,6 +532,127 @@ export default function ProjectPage() {
       )}
 
       {addOpen && <AddProjectPage stackIndex={2} onClose={() => setAddOpen(false)} />}
+
+      {identityOpen && (
+        <Drawer title="设置提交身份" stackIndex={1} width={420} onClose={() => setIdentityOpen(false)}>
+          <div className="min-h-full flex flex-col">
+            <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+              首次保存版本前，请设置会写入历史记录的名称和邮箱。
+            </p>
+            <label className="block space-y-1.5 mb-3">
+              <span className="text-sm font-medium">名称 *</span>
+              <input
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2"
+                value={identityName}
+                onChange={(e) => setIdentityName(e.target.value)}
+                placeholder="例如：张三"
+              />
+            </label>
+            <label className="block space-y-1.5 mb-4">
+              <span className="text-sm font-medium">邮箱 *</span>
+              <input
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2"
+                value={identityEmail}
+                onChange={(e) => setIdentityEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+            </label>
+            {identityErr && <p className="text-sm text-[var(--color-error-fg)] mb-3">{identityErr}</p>}
+            <div className="mt-auto flex justify-end gap-2">
+              <button type="button" onClick={() => setIdentityOpen(false)} className="px-3 py-1.5 text-sm">
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={saveIdentity.isPending}
+                onClick={() => saveIdentity.mutate()}
+                className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+              >
+                保存并继续
+              </button>
+            </div>
+          </div>
+        </Drawer>
+      )}
+
+      {settingsOpen && (
+        <Drawer
+          title="项目设置"
+          stackIndex={1}
+          width={420}
+          onClose={() => {
+            setSettingsOpen(false);
+            setRemoveConfirm(false);
+          }}
+        >
+          <div className="min-h-full flex flex-col gap-4">
+            <div>
+              <div className="text-sm font-medium mb-1">{project.data?.name || "项目"}</div>
+              <p className="text-xs font-mono text-[var(--color-text-tertiary)] break-all">
+                {project.data?.path || "…"}
+              </p>
+              {projectMissing && (
+                <p className="mt-2 text-sm text-[var(--color-error-fg)]">当前登记路径找不到目录。</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={revealProject.isPending || projectMissing}
+                onClick={() => revealProject.mutate()}
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+              >
+                在访达中显示
+              </button>
+              <button
+                type="button"
+                disabled={relocateProject.isPending}
+                onClick={() => relocateProject.mutate()}
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+              >
+                重新定位文件夹…
+              </button>
+            </div>
+
+            <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
+              <div className="text-sm font-medium mb-1">从 Forkly 移除</div>
+              <p className="text-xs text-[var(--color-text-secondary)] mb-3">
+                只移除本应用中的登记，不会删除磁盘上的文件夹或 `.git` 历史。
+              </p>
+              {!removeConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => setRemoveConfirm(true)}
+                  className="rounded-[var(--radius-sm)] border border-[var(--color-error-fg)]/40 text-[var(--color-error-fg)] px-3 py-1.5 text-sm"
+                >
+                  移除项目
+                </button>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={removeProject.isPending}
+                    onClick={() => removeProject.mutate()}
+                    className="rounded-[var(--radius-sm)] bg-[var(--color-error-fg)] text-white px-3 py-1.5 text-sm disabled:opacity-50"
+                  >
+                    确认移除
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRemoveConfirm(false)}
+                    className="px-3 py-1.5 text-sm"
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {settingsErr && <p className="text-sm text-[var(--color-error-fg)]">{settingsErr}</p>}
+          </div>
+        </Drawer>
+      )}
     </div>
   );
 }
@@ -433,9 +697,14 @@ type HistoryTreeNode =
 
 function ProjectHistoryPanel({ projectID }: { projectID: string }) {
   const [selected, setSelected] = useState("");
+  const [activeFile, setActiveFile] = useState("");
   useEffect(() => {
     setSelected("");
+    setActiveFile("");
   }, [projectID]);
+  useEffect(() => {
+    setActiveFile("");
+  }, [selected]);
   const history = useQuery({
     queryKey: ["history", projectID],
     queryFn: () => api<{ commits: Commit[] }>(`/local-api/v1/projects/${projectID}/history`),
@@ -445,6 +714,14 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
     queryFn: () =>
       api<{ commit: Commit; files: CommitFile[] }>(`/local-api/v1/projects/${projectID}/commits/${selected}`),
     enabled: !!selected,
+  });
+  const commitDiff = useQuery({
+    queryKey: ["commit-diff", projectID, selected, activeFile],
+    queryFn: () =>
+      api<DiffResult>(
+        `/local-api/v1/projects/${projectID}/commits/${selected}/diff?path=${encodeURIComponent(activeFile)}`,
+      ),
+    enabled: !!selected && !!activeFile,
   });
 
   const commits = history.data?.commits || [];
@@ -489,15 +766,47 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
               </button>
             </p>
             <h3 className="text-sm font-medium mb-2">修改的文件</h3>
-            <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-[var(--radius-lg)]">
-              {detail.data.files.map((f) => (
-                <li key={f.path} className="px-3 py-2 flex items-center gap-3 text-sm">
-                  <span className="font-mono flex-1 truncate">{f.path}</span>
-                  <span className="text-[var(--color-success-fg)] text-xs">+{f.additions}</span>
-                  <span className="text-[var(--color-error-fg)] text-xs">-{f.deletions}</span>
-                </li>
-              ))}
+            <ul className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-[var(--radius-lg)] mb-5">
+              {detail.data.files.map((f) => {
+                const active = activeFile === f.path;
+                return (
+                  <li key={f.path}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFile(f.path)}
+                      className={`w-full px-3 py-2 flex items-center gap-3 text-sm text-left cursor-pointer ${
+                        active
+                          ? "bg-[var(--color-surface-active)]"
+                          : "hover:bg-[var(--color-surface-hover)]"
+                      }`}
+                    >
+                      <span className="font-mono flex-1 truncate" title={f.path}>
+                        {f.path}
+                      </span>
+                      <span className="text-[var(--color-success-fg)] text-xs">+{f.additions}</span>
+                      <span className="text-[var(--color-error-fg)] text-xs">-{f.deletions}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
+            {activeFile && (
+              <div>
+                <h3 className="text-sm font-medium mb-2">文件差异</h3>
+                {commitDiff.isLoading && (
+                  <p className="text-sm text-[var(--color-text-secondary)]">加载差异…</p>
+                )}
+                {commitDiff.isError && (
+                  <p className="text-sm text-[var(--color-error-fg)]">
+                    {(commitDiff.error as Error).message}
+                  </p>
+                )}
+                {commitDiff.data && <DiffView diff={commitDiff.data} />}
+              </div>
+            )}
+            {selected && !activeFile && (
+              <p className="text-sm text-[var(--color-text-tertiary)]">点击上方文件查看该版本的文本差异</p>
+            )}
           </div>
         )}
       </div>
@@ -1039,24 +1348,28 @@ function DiffView({ diff }: { diff: DiffResult }) {
         <span className="text-xs text-[var(--color-error-fg)]">-{diff.deletions || 0}</span>
         {diff.truncated && <span className="text-xs text-[var(--color-warning-fg)]">已截断</span>}
       </div>
-      <pre className="text-[12px] font-mono leading-[1.45] overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-3">
-        {(diff.patch || "").split("\n").map((line, i) => (
-          <div
-            key={i}
-            className={
-              line.startsWith("+") && !line.startsWith("+++")
-                ? "bg-[var(--color-diff-add)]"
-                : line.startsWith("-") && !line.startsWith("---")
-                  ? "bg-[var(--color-diff-del)]"
-                  : line.startsWith("@@")
-                    ? "text-[var(--color-text-secondary)]"
-                    : ""
-            }
-          >
-            {line || " "}
-          </div>
-        ))}
-      </pre>
+      {!diff.patch && diff.message ? (
+        <p className="text-sm text-[var(--color-text-secondary)]">{diff.message}</p>
+      ) : (
+        <pre className="text-[12px] font-mono leading-[1.45] overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-3">
+          {(diff.patch || "").split("\n").map((line, i) => (
+            <div
+              key={i}
+              className={
+                line.startsWith("+") && !line.startsWith("+++")
+                  ? "bg-[var(--color-diff-add)]"
+                  : line.startsWith("-") && !line.startsWith("---")
+                    ? "bg-[var(--color-diff-del)]"
+                    : line.startsWith("@@")
+                      ? "text-[var(--color-text-secondary)]"
+                      : ""
+              }
+            >
+              {line || " "}
+            </div>
+          ))}
+        </pre>
+      )}
     </div>
   );
 }

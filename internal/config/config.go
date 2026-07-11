@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,6 +24,26 @@ type ProjectEntry struct {
 type GitIdentity struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
+}
+
+// Default placeholder identity written on first launch.
+const (
+	DefaultIdentityName  = "本机身份"
+	DefaultIdentityEmail = "local@forkly.local"
+)
+
+// IdentityConfigured reports whether the user has set a real Git identity
+// (not the built-in placeholder).
+func IdentityConfigured(id GitIdentity) bool {
+	name := strings.TrimSpace(id.Name)
+	email := strings.TrimSpace(id.Email)
+	if name == "" || email == "" {
+		return false
+	}
+	if name == DefaultIdentityName && email == DefaultIdentityEmail {
+		return false
+	}
+	return true
 }
 
 type Preferences struct {
@@ -98,8 +119,8 @@ func defaultFile() File {
 		Version: Version,
 		Projects: []ProjectEntry{},
 		Identity: GitIdentity{
-			Name:  "本机身份",
-			Email: "local@forkly.local",
+			Name:  DefaultIdentityName,
+			Email: DefaultIdentityEmail,
 		},
 		Preferences: Preferences{
 			Theme:            "system",
