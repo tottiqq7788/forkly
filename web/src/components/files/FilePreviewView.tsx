@@ -88,27 +88,39 @@ export function FilePreviewView({
       {showText ? (
         file.content === "" ? (
           <p className="text-sm text-[var(--color-text-secondary)]">空文件</p>
-        ) : canPreview && effectiveMode === "preview" ? (
-          <MarkdownErrorBoundary
-            onShowSource={() => setMode("source")}
-            fallback={
-              <SourceBlock content={file.content!} />
-            }
-          >
-            <Suspense fallback={<p className="text-sm text-[var(--color-text-secondary)]">加载 Markdown 预览…</p>}>
-              <MarkdownPreviewView
-                content={file.content!}
-                projectID={projectID}
-                source={file.source}
-                ownerPath={file.path}
-                onOpenPath={onOpenPath ?? (() => undefined)}
-                pendingFragment={pendingFragment}
-                onFragmentConsumed={onFragmentConsumed}
-              />
-            </Suspense>
-          </MarkdownErrorBoundary>
         ) : (
-          <SourceBlock content={file.content!} />
+          <>
+            {canPreview ? (
+              <div
+                className={effectiveMode === "preview" ? undefined : "hidden"}
+                aria-hidden={effectiveMode !== "preview"}
+              >
+                <MarkdownErrorBoundary
+                  onShowSource={() => setMode("source")}
+                  fallback={<SourceBlock content={file.content!} />}
+                >
+                  <Suspense
+                    fallback={
+                      <p className="text-sm text-[var(--color-text-secondary)]">加载 Markdown 预览…</p>
+                    }
+                  >
+                    <MarkdownPreviewView
+                      content={file.content!}
+                      projectID={projectID}
+                      source={file.source}
+                      ownerPath={file.path}
+                      onOpenPath={onOpenPath ?? (() => undefined)}
+                      pendingFragment={pendingFragment}
+                      onFragmentConsumed={onFragmentConsumed}
+                    />
+                  </Suspense>
+                </MarkdownErrorBoundary>
+              </div>
+            ) : null}
+            {effectiveMode === "source" || !canPreview ? (
+              <SourceBlock content={file.content!} />
+            ) : null}
+          </>
         )
       ) : null}
 
@@ -125,7 +137,7 @@ export function FilePreviewView({
 
 function SourceBlock({ content }: { content: string }) {
   return (
-    <pre className="text-[12px] font-mono leading-[1.5] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-3">
+    <pre className="text-[12px] font-mono leading-[1.5] whitespace-pre-wrap break-words rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-3">
       {content}
     </pre>
   );

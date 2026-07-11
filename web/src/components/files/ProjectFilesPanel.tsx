@@ -258,7 +258,7 @@ export function ProjectFilesPanel({
         </div>
       </section>
 
-      <section className="flex-1 min-w-0 overflow-auto p-4">
+      <section className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 scrollbar-none">
         {!activePath && (
           <p className="text-sm text-[var(--color-text-secondary)]">
             {emptyHead && source === "head" ? "当前分支还没有任何提交" : "选择一个文件查看内容"}

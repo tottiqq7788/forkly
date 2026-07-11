@@ -17,10 +17,20 @@ function forklyTheme(): "default" | "dark" {
   }
 }
 
-function sanitizeMermaidSvg(svg: string): string {
+/**
+ * Mermaid flowcharts put node labels in SVG `<foreignObject>` + XHTML.
+ * DOMPurify ≥3.1.7 no longer treats foreignObject as an HTML integration
+ * point by default, so without HTML_INTEGRATION_POINTS the tag stays but
+ * inner labels are wiped — shapes render, text disappears.
+ * @see https://github.com/cure53/DOMPurify/issues/1002
+ */
+export function sanitizeMermaidSvg(svg: string): string {
   return DOMPurify.sanitize(svg, {
-    USE_PROFILES: { svg: true, svgFilters: true },
-    FORBID_TAGS: ["script", "foreignObject", "iframe", "object", "embed", "a"],
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    ADD_TAGS: ["foreignObject", "div", "span", "p", "br", "b", "i", "em", "strong", "ul", "ol", "li"],
+    ADD_ATTR: ["dominant-baseline", "class", "style", "xmlns"],
+    HTML_INTEGRATION_POINTS: { foreignobject: true },
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "a"],
     FORBID_ATTR: ["onclick", "onload", "onerror", "onmouseover", "href", "xlink:href"],
   });
 }

@@ -366,7 +366,7 @@ export default function ProjectPage() {
   const blocked = health && !health.ok;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       <header className="relative h-12 border-b border-[var(--color-border)] px-4 flex items-center gap-3 shrink-0">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 min-w-0">

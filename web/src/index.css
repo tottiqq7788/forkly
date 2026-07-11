@@ -93,3 +93,12 @@ body {
   font-size: 14px;
   line-height: 1.4;
 }
+
+/* Keep scroll, hide the bar (Firefox / legacy / WebKit). */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

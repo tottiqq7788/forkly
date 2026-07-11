@@ -251,6 +251,14 @@
   height: auto;
 }
 
+/* foreignObject labels inherit readable text color in both themes */
+.forkly-markdown .forkly-mermaid .nodeLabel,
+.forkly-markdown .forkly-mermaid .edgeLabel,
+.forkly-markdown .forkly-mermaid foreignObject div,
+.forkly-markdown .forkly-mermaid foreignObject span {
+  color: var(--color-text);
+}
+
 .forkly-markdown .forkly-mermaid-loading {
   color: var(--color-text-tertiary);
   font-size: 13px;
