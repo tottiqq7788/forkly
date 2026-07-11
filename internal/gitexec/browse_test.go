@@ -237,6 +237,12 @@ func TestNormalizeBrowsePath(t *testing.T) {
 	if _, err := normalizeBrowsePath(".GIT/config"); err == nil {
 		t.Fatal("expected .GIT error")
 	}
+	if _, err := normalizeBrowsePath("docs/.git/config"); err == nil {
+		t.Fatal("expected nested .git error")
+	}
+	if _, err := normalizeBrowsePath("a/.GIT/HEAD"); err == nil {
+		t.Fatal("expected nested .GIT error")
+	}
 	if _, err := normalizeBrowsePath("-rf"); err == nil {
 		t.Fatal("expected dash path error")
 	}

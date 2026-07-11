@@ -141,12 +141,23 @@ func enrichTextContent(out FileContent, raw []byte) FileContent {
 		!out.Truncated &&
 		out.Kind == DiffText &&
 		out.Size <= MaxEditBytes &&
-		out.Message == ""
+		out.Message == "" &&
+		isMarkdownRel(out.Path)
 	out.Editable = editable
 	return out
 }
 
-// WriteContent atomically replaces a worktree text file when expectedRevision matches.
+func isMarkdownRel(rel string) bool {
+	ext := strings.ToLower(filepath.Ext(rel))
+	switch ext {
+	case ".md", ".markdown", ".mdown", ".mkdn", ".mkd", ".mdwn", ".mdtxt", ".mdtext":
+		return true
+	default:
+		return false
+	}
+}
+
+// WriteContent atomically replaces a worktree Markdown file when expectedRevision matches.
 func (e *Executor) WriteContent(repo, rel, content, expectedRevision string) (WriteContentResult, error) {
 	rel, err := normalizeBrowsePath(rel)
 	if err != nil {
@@ -157,6 +168,9 @@ func (e *Executor) WriteContent(repo, rel, content, expectedRevision string) (Wr
 	}
 	if isGitMetaPath(rel) {
 		return WriteContentResult{}, fmt.Errorf("不允许访问 .git")
+	}
+	if !isMarkdownRel(rel) {
+		return WriteContentResult{}, fmt.Errorf("仅支持编辑 Markdown 文件")
 	}
 	if int64(len(content)) > MaxEditBytes {
 		return WriteContentResult{}, fmt.Errorf("内容超过编辑上限")
@@ -487,6 +501,11 @@ func (e *Executor) ReadAssetBytes(ctx context.Context, repo string, source Brows
 	raw, decErr := base64.StdEncoding.DecodeString(fc.DataURL[i+len(prefix):])
 	if decErr != nil {
 		return "", nil, "", fmt.Errorf("无法读取图片")
+	}
+	if sniffed, ok := sniffImageMIME(raw); ok {
+		mime = sniffed
+	} else {
+		return "", nil, "", fmt.Errorf("不是可预览图片")
 	}
 	return mime, raw, contentRevision(raw), nil
 }

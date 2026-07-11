@@ -32,6 +32,8 @@ describe("normalizeRepoPath", () => {
     expect(normalizeRepoPath("a.md", ".git/HEAD")).toBeNull();
     expect(normalizeRepoPath("a.md", ".GIT/config")).toBeNull();
     expect(normalizeRepoPath("a.md", ".Git/HEAD")).toBeNull();
+    expect(normalizeRepoPath("a.md", "vendor/.git/config")).toBeNull();
+    expect(normalizeRepoPath("a.md", "vendor/.GIT/HEAD")).toBeNull();
     expect(resolveMarkdownLink("a.md", ".GIT/config").kind).toBe("blocked");
     expect(resolveMarkdownImage("a.md", ".GIT/HEAD").kind).toBe("blocked");
   });

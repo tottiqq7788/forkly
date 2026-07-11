@@ -138,6 +138,40 @@ func TestWriteContentRejectsEscapeAndGit(t *testing.T) {
 	if _, err := e.WriteContent(repo, ".git/config", "a", "r"); err == nil {
 		t.Fatal("expected .git error")
 	}
+	if _, err := e.WriteContent(repo, "docs/.git/config", "a", "r"); err == nil {
+		t.Fatal("expected nested .git error")
+	}
+	if _, err := e.WriteContent(repo, "notes/.GIT/HEAD", "a", "r"); err == nil {
+		t.Fatal("expected nested .GIT error")
+	}
+}
+
+func TestWriteContentRejectsNonMarkdown(t *testing.T) {
+	repo := t.TempDir()
+	initRepo(t, repo)
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := testExecutor(t)
+	fc, err := e.ReadContent(context.Background(), repo, SourceWorktree, "a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Editable {
+		t.Fatal("plain text should not be editable")
+	}
+	if _, err := e.WriteContent(repo, "a.txt", "bye\n", fc.Revision); err == nil {
+		t.Fatal("expected non-markdown rejection")
+	}
+}
+
+func TestNormalizeBrowsePathRejectsNestedGit(t *testing.T) {
+	if _, err := normalizeBrowsePath("vendor/.git/config"); err == nil {
+		t.Fatal("expected nested .git reject")
+	}
+	if _, err := normalizeBrowsePath("a/.GIT/HEAD"); err == nil {
+		t.Fatal("expected nested .GIT reject")
+	}
 }
 
 func TestWriteContentRejectsSymlink(t *testing.T) {

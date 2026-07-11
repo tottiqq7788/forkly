@@ -204,7 +204,16 @@ func normalizeBrowsePath(rel string) (string, error) {
 func isGitMetaPath(rel string) bool {
 	rel = filepath.ToSlash(rel)
 	lower := strings.ToLower(rel)
-	return lower == ".git" || strings.HasPrefix(lower, ".git/")
+	if lower == ".git" || strings.HasPrefix(lower, ".git/") {
+		return true
+	}
+	// Nested submodule / planted metadata dirs: docs/.git/config
+	for _, part := range strings.Split(lower, "/") {
+		if part == ".git" {
+			return true
+		}
+	}
+	return false
 }
 
 func relOrDot(rel string) string {

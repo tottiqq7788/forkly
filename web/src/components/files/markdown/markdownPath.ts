@@ -67,10 +67,11 @@ function decodeMaybe(part: string): string {
   }
 }
 
-/** Case-insensitive `.git` / `.git/...` (macOS APFS default is case-insensitive). */
+/** Case-insensitive `.git` / `.git/...` / nested `foo/.git` (macOS APFS default is case-insensitive). */
 export function isGitMetaPath(rel: string): boolean {
   const lower = rel.replace(/\\/g, "/").toLowerCase();
-  return lower === ".git" || lower.startsWith(".git/");
+  if (lower === ".git" || lower.startsWith(".git/")) return true;
+  return lower.split("/").some((part) => part === ".git");
 }
 
 /** Normalize a repo-relative path. Leading `/` means project root, not OS absolute. */

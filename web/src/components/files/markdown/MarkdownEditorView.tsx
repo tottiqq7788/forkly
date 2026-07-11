@@ -241,10 +241,11 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
           imageSrcResolver: (src: string) => {
             const raw = (src || "").trim();
             if (!raw) return null;
-            if (/^https?:\/\//i.test(raw) || SAFE_UPLOAD_DATA.test(raw.replace(/\s+/g, ""))) {
+            // HTTPS remote + safe data URLs only (block http / file / javascript).
+            if (/^https:\/\//i.test(raw) || SAFE_UPLOAD_DATA.test(raw.replace(/\s+/g, ""))) {
               return raw;
             }
-            if (/^(file:|javascript:|data:)/i.test(raw) || raw.startsWith("//")) {
+            if (/^(https?:|file:|javascript:|data:)/i.test(raw) || raw.startsWith("//")) {
               return "";
             }
             const resolved = resolveMarkdownImage(pathRef.current, raw);
