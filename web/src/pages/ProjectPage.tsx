@@ -1338,10 +1338,7 @@ function DiffView({ diff }: { diff: DiffResult }) {
   if (diff.kind === "image") {
     return (
       <div>
-        <div className="mb-3 text-sm">
-          <span className="font-mono">{diff.path}</span>
-          <span className="text-[var(--color-text-secondary)] ml-2">图片</span>
-        </div>
+        <DiffFileHeader path={diff.path} summary="图片对比" />
         <div className="grid grid-cols-2 gap-4">
           <figure>
             <figcaption className="text-xs text-[var(--color-text-secondary)] mb-2">上一个版本</figcaption>
@@ -1366,44 +1363,187 @@ function DiffView({ diff }: { diff: DiffResult }) {
   if (diff.kind === "binary") {
     return (
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-4">
-        <div className="font-mono text-sm mb-2">{diff.path}</div>
-        <p className="text-[var(--color-text-secondary)]">{diff.message || "二进制文件"}</p>
+        <DiffFileHeader path={diff.path} summary={diff.message || "二进制文件，无法以文字形式预览"} />
         {diff.newSize != null && (
-          <p className="text-xs font-mono mt-2 text-[var(--color-text-tertiary)]">{diff.newSize} 字节</p>
+          <p className="text-xs text-[var(--color-text-tertiary)] mt-2">大小约 {formatByteSize(diff.newSize)}</p>
         )}
       </div>
     );
   }
+
+  const rows = parseReadableDiff(diff.patch || "");
+  const summary = summarizeTextDiff(diff.additions || 0, diff.deletions || 0);
+
   return (
     <div>
-      <div className="mb-3 flex items-baseline gap-3">
-        <span className="font-mono text-sm">{diff.path}</span>
-        <span className="text-xs text-[var(--color-success-fg)]">+{diff.additions || 0}</span>
-        <span className="text-xs text-[var(--color-error-fg)]">-{diff.deletions || 0}</span>
-        {diff.truncated && <span className="text-xs text-[var(--color-warning-fg)]">已截断</span>}
-      </div>
+      <DiffFileHeader
+        path={diff.path}
+        summary={summary}
+        note={diff.truncated ? "内容较长，仅显示部分变更" : undefined}
+      />
       {!diff.patch && diff.message ? (
         <p className="text-sm text-[var(--color-text-secondary)]">{diff.message}</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-[var(--color-text-secondary)]">没有可展示的文字改动</p>
       ) : (
-        <pre className="text-[12px] font-mono leading-[1.45] overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-3">
-          {(diff.patch || "").split("\n").map((line, i) => (
-            <div
-              key={i}
-              className={
-                line.startsWith("+") && !line.startsWith("+++")
-                  ? "bg-[var(--color-diff-add)]"
-                  : line.startsWith("-") && !line.startsWith("---")
-                    ? "bg-[var(--color-diff-del)]"
-                    : line.startsWith("@@")
-                      ? "text-[var(--color-text-secondary)]"
+        <div className="overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)]">
+          {rows.map((row, i) => {
+            if (row.kind === "gap") {
+              return (
+                <div
+                  key={i}
+                  className="px-3 py-2 text-xs text-[var(--color-text-tertiary)] border-y border-[var(--color-border)] bg-[var(--color-canvas)]"
+                >
+                  {row.label}
+                </div>
+              );
+            }
+            const isAdd = row.kind === "add";
+            const isDel = row.kind === "del";
+            return (
+              <div
+                key={i}
+                className={`flex gap-3 px-3 py-1.5 text-[13px] leading-[1.5] ${
+                  isAdd
+                    ? "bg-[var(--color-diff-add)]"
+                    : isDel
+                      ? "bg-[var(--color-diff-del)]"
                       : ""
-              }
-            >
-              {line || " "}
-            </div>
-          ))}
-        </pre>
+                }`}
+              >
+                <span
+                  className={`shrink-0 w-8 text-xs pt-0.5 ${
+                    isAdd
+                      ? "text-[var(--color-success-fg)]"
+                      : isDel
+                        ? "text-[var(--color-error-fg)]"
+                        : "text-[var(--color-text-tertiary)]"
+                  }`}
+                >
+                  {isAdd ? "新增" : isDel ? "删除" : ""}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px]">
+                  {row.text || " "}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
+}
+
+function DiffFileHeader({
+  path,
+  summary,
+  note,
+}: {
+  path: string;
+  summary: string;
+  note?: string;
+}) {
+  const slash = path.lastIndexOf("/");
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const dir = slash >= 0 ? path.slice(0, slash) : "";
+  return (
+    <div className="mb-4">
+      <div className="text-base font-medium text-[var(--color-text)]">{name || path}</div>
+      {dir ? <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]">{dir}/</div> : null}
+      <div className="mt-2 text-sm text-[var(--color-text-secondary)]">
+        {summary}
+        {note ? <span className="ml-2 text-[var(--color-warning-fg)]">{note}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function summarizeTextDiff(additions: number, deletions: number): string {
+  if (additions === 0 && deletions === 0) return "没有文字改动";
+  const parts: string[] = [];
+  if (additions > 0) parts.push(`新增 ${additions} 行`);
+  if (deletions > 0) parts.push(`删除 ${deletions} 行`);
+  return parts.join(" · ");
+}
+
+function formatByteSize(n: number): string {
+  if (n < 1024) return `${n} 字节`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+type ReadableDiffRow =
+  | { kind: "add" | "del" | "ctx"; text: string }
+  | { kind: "gap"; label: string };
+
+function parseReadableDiff(patch: string): ReadableDiffRow[] {
+  if (!patch.trim()) return [];
+  const rows: ReadableDiffRow[] = [];
+  let sawContent = false;
+  for (const line of patch.split("\n")) {
+    if (
+      line.startsWith("diff --git") ||
+      line.startsWith("index ") ||
+      line.startsWith("new file mode") ||
+      line.startsWith("deleted file mode") ||
+      line.startsWith("old mode") ||
+      line.startsWith("new mode") ||
+      line.startsWith("similarity index") ||
+      line.startsWith("rename from") ||
+      line.startsWith("rename to") ||
+      line.startsWith("copy from") ||
+      line.startsWith("copy to") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ") ||
+      line.startsWith("\\ No newline") ||
+      line.startsWith("Binary files ")
+    ) {
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      const m = line.match(/@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/);
+      const at = m ? Number(m[2]) : 0;
+      rows.push({
+        kind: "gap",
+        label: at > 1 ? `··· 第 ${at} 行附近 ···` : "··· 文件开头 ···",
+      });
+      continue;
+    }
+    if (line.startsWith("…") || line.includes("已截断")) {
+      rows.push({ kind: "gap", label: "··· 后面还有更多改动，已省略 ···" });
+      continue;
+    }
+    if (line.startsWith("+")) {
+      rows.push({ kind: "add", text: line.slice(1) });
+      sawContent = true;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      rows.push({ kind: "del", text: line.slice(1) });
+      sawContent = true;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      rows.push({ kind: "ctx", text: line.slice(1) });
+      sawContent = true;
+      continue;
+    }
+    if (line === "" && sawContent) {
+      rows.push({ kind: "ctx", text: "" });
+    }
+  }
+  // Drop leading gap if it's the only separator before content.
+  while (rows.length > 0 && rows[0].kind === "gap") {
+    const next = rows[1];
+    if (!next || next.kind === "gap") {
+      rows.shift();
+      continue;
+    }
+    // Keep first location hint only when useful (not "文件开头" for tiny files).
+    if (rows[0].kind === "gap" && rows[0].label.includes("文件开头") && rows.length < 8) {
+      rows.shift();
+    }
+    break;
+  }
+  return rows;
 }
