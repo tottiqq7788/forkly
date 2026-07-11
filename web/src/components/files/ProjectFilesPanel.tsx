@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CaretRight, File as FileIcon, FolderSimple, LinkSimple } from "@phosphor-icons/react";
 import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
@@ -28,6 +28,25 @@ export function ProjectFilesPanel({ projectID, projectName }: Props) {
     setSelection({ worktree: { path: "" }, head: { path: "" } });
   }, [projectID]);
 
+  useEffect(() => {
+    setExpanded(new Set([""]));
+  }, [source]);
+
+  const expandDirs = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+    setExpanded((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const path of paths) {
+        if (!next.has(path)) {
+          next.add(path);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
   const rootQuery = useInfiniteQuery({
     queryKey: ["workspace-tree", projectID, source, ""],
     initialPageParam: 0,
@@ -43,6 +62,16 @@ export function ProjectFilesPanel({ projectID, projectName }: Props) {
     [rootQuery.data],
   );
   const emptyHead = rootQuery.data?.pages[0]?.emptyHead === true;
+
+  useEffect(() => {
+    expandDirs(dirPaths(rootEntries));
+  }, [expandDirs, rootEntries]);
+
+  useEffect(() => {
+    if (rootQuery.hasNextPage && !rootQuery.isFetchingNextPage) {
+      void rootQuery.fetchNextPage();
+    }
+  }, [rootQuery.hasNextPage, rootQuery.isFetchingNextPage, rootQuery.data, rootQuery.fetchNextPage]);
 
   useEffect(() => {
     if (activePath) return;
@@ -81,10 +110,10 @@ export function ProjectFilesPanel({ projectID, projectName }: Props) {
       <section className="w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
         <div className="p-2 border-b border-[var(--color-border)] flex gap-1">
           <SourceButton active={source === "worktree"} onClick={() => setSource("worktree")}>
-            工作区
+            目录
           </SourceButton>
           <SourceButton active={source === "head"} onClick={() => setSource("head")}>
-            已提交版本
+            版本
           </SourceButton>
         </div>
         <div className="overflow-auto flex-1 py-1 px-2">
@@ -119,19 +148,10 @@ export function ProjectFilesPanel({ projectID, projectName }: Props) {
                     expanded={expanded}
                     activePath={activePath}
                     onToggleDir={toggleDir}
+                    onExpandDirs={expandDirs}
                     onSelectFile={selectFile}
                   />
                 ))
-              )}
-              {rootQuery.hasNextPage && (
-                <button
-                  type="button"
-                  className="mt-1 w-full rounded-[var(--radius-sm)] px-2 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-                  onClick={() => rootQuery.fetchNextPage()}
-                  disabled={rootQuery.isFetchingNextPage}
-                >
-                  {rootQuery.isFetchingNextPage ? "加载中…" : "加载更多"}
-                </button>
               )}
             </>
           )}
@@ -180,6 +200,10 @@ function SourceButton({
   );
 }
 
+function dirPaths(entries: TreeEntry[]): string[] {
+  return entries.filter((entry) => entry.kind === "dir").map((entry) => entry.path);
+}
+
 function findFirstFile(entries: TreeEntry[]): string {
   for (const entry of entries) {
     if (entry.kind === "file") return entry.path;
@@ -195,6 +219,7 @@ function TreeNode({
   expanded,
   activePath,
   onToggleDir,
+  onExpandDirs,
   onSelectFile,
 }: {
   projectID: string;
@@ -204,6 +229,7 @@ function TreeNode({
   expanded: Set<string>;
   activePath: string;
   onToggleDir: (path: string) => void;
+  onExpandDirs: (paths: string[]) => void;
   onSelectFile: (path: string) => void;
 }) {
   const isDir = entry.kind === "dir";
@@ -225,6 +251,24 @@ function TreeNode({
     () => childQuery.data?.pages.flatMap((p) => p.entries) ?? [],
     [childQuery.data],
   );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    onExpandDirs(dirPaths(childEntries));
+  }, [childEntries, isOpen, onExpandDirs]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (childQuery.hasNextPage && !childQuery.isFetchingNextPage) {
+      void childQuery.fetchNextPage();
+    }
+  }, [
+    isOpen,
+    childQuery.hasNextPage,
+    childQuery.isFetchingNextPage,
+    childQuery.data,
+    childQuery.fetchNextPage,
+  ]);
 
   return (
     <div>
@@ -287,20 +331,10 @@ function TreeNode({
               expanded={expanded}
               activePath={activePath}
               onToggleDir={onToggleDir}
+              onExpandDirs={onExpandDirs}
               onSelectFile={onSelectFile}
             />
           ))}
-          {childQuery.hasNextPage && (
-            <button
-              type="button"
-              className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
-              style={{ paddingLeft: 18 + depth * 14 }}
-              onClick={() => childQuery.fetchNextPage()}
-              disabled={childQuery.isFetchingNextPage}
-            >
-              {childQuery.isFetchingNextPage ? "加载中…" : "加载更多"}
-            </button>
-          )}
         </div>
       )}
     </div>

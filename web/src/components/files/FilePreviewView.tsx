@@ -4,7 +4,7 @@ export function FilePreviewView({ file }: { file: FileContent }) {
   const slash = file.path.lastIndexOf("/");
   const name = slash >= 0 ? file.path.slice(slash + 1) : file.path;
   const dir = slash >= 0 ? file.path.slice(0, slash) : "";
-  const sourceLabel = file.source === "head" ? "已提交版本" : "工作区";
+  const sourceLabel = file.source === "head" ? "版本" : "目录";
   const showText = (file.kind === "text" || file.kind === "too_large") && file.content != null;
   const showImage = file.kind === "image" && !!file.dataUrl;
   const showMeta =
