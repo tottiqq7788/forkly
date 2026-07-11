@@ -753,3 +753,184 @@ func TestProjectLifecycleAndIdentity(t *testing.T) {
 		t.Fatalf(".git should remain: %v", err)
 	}
 }
+
+func TestBrowseTreeAndContentAPI(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	dataDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+	csrf := readCSRF(client, base)
+
+	repo := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("add %d", res.StatusCode)
+	}
+	id, _ := proj["id"].(string)
+
+	// Empty HEAD
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/tree?source=head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emptyHead struct {
+		EmptyHead bool `json:"emptyHead"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&emptyHead)
+	res.Body.Close()
+	if res.StatusCode != 200 || !emptyHead.EmptyHead {
+		t.Fatalf("empty head: status=%d empty=%v", res.StatusCode, emptyHead.EmptyHead)
+	}
+
+	// Unauthenticated
+	res, err = http.Get(base + "/local-api/v1/projects/" + id + "/tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("unauth tree %d", res.StatusCode)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "hello.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identBody, _ := json.Marshal(map[string]any{
+		"identity": map[string]string{"name": "Browse User", "email": "browse@example.com"},
+	})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/settings", bytes.NewReader(identBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	stRes, err := client.Get(base + "/local-api/v1/projects/" + id + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	_ = json.NewDecoder(stRes.Body).Decode(&st)
+	stRes.Body.Close()
+	commitBody, _ := json.Marshal(map[string]any{
+		"paths": []string{"hello.txt"}, "message": "add hello", "fingerprint": st.Fingerprint,
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/commit", bytes.NewReader(commitBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("commit %d", res.StatusCode)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "hello.txt"), []byte("hello2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/tree?source=worktree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree struct {
+		Entries []struct {
+			Name string `json:"name"`
+		} `json:"entries"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&tree)
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("tree %d", res.StatusCode)
+	}
+	foundExtra := false
+	for _, e := range tree.Entries {
+		if e.Name == ".git" {
+			t.Fatal(".git listed")
+		}
+		if e.Name == "extra.txt" {
+			foundExtra = true
+		}
+	}
+	if !foundExtra {
+		t.Fatal("worktree missing extra.txt")
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/content?source=worktree&path=hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wtContent struct {
+		Content string `json:"content"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&wtContent)
+	res.Body.Close()
+	if wtContent.Content != "hello2\n" {
+		t.Fatalf("worktree content=%q", wtContent.Content)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/content?source=head&path=hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var headContent struct {
+		Content string `json:"content"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&headContent)
+	res.Body.Close()
+	if headContent.Content != "hello\n" {
+		t.Fatalf("head content=%q", headContent.Content)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/tree?source=nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("bad source %d", res.StatusCode)
+	}
+
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/content?source=worktree&path=../x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Fatalf("escape content %d", res.StatusCode)
+	}
+}

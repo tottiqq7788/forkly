@@ -2,6 +2,7 @@ package localapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/forkly-app/forkly/internal/config"
@@ -204,6 +205,47 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, d)
+	case "tree":
+		source, err := gitexec.ParseBrowseSource(r.URL.Query().Get("source"))
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset := 0
+		if v := r.URL.Query().Get("offset"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				offset = n
+			}
+		}
+		limit := 0
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				limit = n
+			}
+		}
+		listing, err := s.deps.Git.ListTree(r.Context(), p.Path, source, r.URL.Query().Get("path"), offset, limit)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, listing)
+	case "content":
+		source, err := gitexec.ParseBrowseSource(r.URL.Query().Get("source"))
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		file := r.URL.Query().Get("path")
+		if file == "" {
+			writeErr(w, http.StatusBadRequest, "缺少 path")
+			return
+		}
+		content, err := s.deps.Git.ReadContent(r.Context(), p.Path, source, file)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, content)
 	case "commit":
 		s.authWrite(s.handleCommit(id, p))(w, r)
 	case "history":

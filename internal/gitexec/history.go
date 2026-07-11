@@ -122,15 +122,25 @@ func (e *Executor) CommitDetail(ctx context.Context, repo, sha string) (CommitSu
 	if len(commits) == 0 {
 		return CommitSummary{}, nil, fmt.Errorf("提交不存在")
 	}
-	num, err := e.Run(ctx, RunOpts{
-		Repo: repo,
-		Args: []string{"show", "--numstat", "--format=", "--name-status", sha},
+	statusOut, err := e.Run(ctx, RunOpts{
+		Repo:    repo,
+		Args:    []string{"show", "--name-status", "--format=", sha},
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
 		return commits[0], nil, err
 	}
-	files := parseNameStatusNumstat(num.Stdout)
+	numOut, err := e.Run(ctx, RunOpts{
+		Repo:    repo,
+		Args:    []string{"show", "--numstat", "--format=", sha},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		return commits[0], nil, err
+	}
+	// git show drops --numstat when combined with --name-status; merge both outputs.
+	combined := append(append([]byte{}, statusOut.Stdout...), numOut.Stdout...)
+	files := parseNameStatusNumstat(combined)
 	return commits[0], files, nil
 }
 
@@ -139,39 +149,32 @@ func parseNameStatusNumstat(data []byte) []CommitFile {
 	statusMap := map[string]CommitFile{}
 	order := []string{}
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		fields := strings.Fields(line)
+		// Prefer tab-separated fields (git name-status / numstat); fall back to whitespace.
+		var fields []string
+		if strings.Contains(line, "\t") {
+			fields = strings.Split(line, "\t")
+		} else {
+			fields = strings.Fields(line)
+		}
 		if len(fields) < 2 {
 			continue
 		}
-		// name-status: M path / R100 old new
-		if len(fields[0]) <= 2 || strings.HasPrefix(fields[0], "R") || strings.HasPrefix(fields[0], "C") ||
-			fields[0] == "A" || fields[0] == "D" || fields[0] == "M" || fields[0] == "T" {
-			st := fields[0]
-			if strings.HasPrefix(st, "R") || strings.HasPrefix(st, "C") {
-				if len(fields) >= 3 {
-					cf := CommitFile{Status: st[:1], OldPath: fields[1], Path: fields[2]}
-					statusMap[cf.Path] = cf
-					order = append(order, cf.Path)
-				}
-			} else {
-				cf := CommitFile{Status: st, Path: fields[1]}
-				statusMap[cf.Path] = cf
-				order = append(order, cf.Path)
+		// numstat: <add> <del> <path>  (add/del may be "-" for binary)
+		// Must be checked before name-status: numeric add counts look like short status codes.
+		if len(fields) >= 3 && isNumstatCount(fields[0]) && isNumstatCount(fields[1]) {
+			add, del := 0, 0
+			if fields[0] != "-" {
+				add, _ = strconv.Atoi(fields[0])
 			}
-			continue
-		}
-		// numstat: add del path
-		if len(fields) >= 3 {
-			add, _ := strconv.Atoi(fields[0])
-			del, _ := strconv.Atoi(fields[1])
-			path := fields[2]
-			if strings.Contains(path, "=>") {
-				// rename in numstat with braces - keep simple
+			if fields[1] != "-" {
+				del, _ = strconv.Atoi(fields[1])
 			}
+			path := strings.Join(fields[2:], "\t")
+			path = normalizeNumstatPath(path)
 			cf := statusMap[path]
 			cf.Path = path
 			cf.Additions = add
@@ -181,7 +184,24 @@ func parseNameStatusNumstat(data []byte) []CommitFile {
 				order = append(order, path)
 			}
 			statusMap[path] = cf
+			continue
 		}
+		// name-status: M path / A path / R100 old new
+		st := fields[0]
+		if !isNameStatusCode(st) {
+			continue
+		}
+		if strings.HasPrefix(st, "R") || strings.HasPrefix(st, "C") {
+			if len(fields) >= 3 {
+				cf := CommitFile{Status: st[:1], OldPath: fields[1], Path: fields[2]}
+				statusMap[cf.Path] = cf
+				order = append(order, cf.Path)
+			}
+			continue
+		}
+		cf := CommitFile{Status: st[:1], Path: fields[1]}
+		statusMap[cf.Path] = cf
+		order = append(order, cf.Path)
 	}
 	out := make([]CommitFile, 0, len(order))
 	seen := map[string]bool{}
@@ -193,6 +213,49 @@ func parseNameStatusNumstat(data []byte) []CommitFile {
 		out = append(out, statusMap[p])
 	}
 	return out
+}
+
+func isNumstatCount(s string) bool {
+	if s == "-" {
+		return true
+	}
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isNameStatusCode(s string) bool {
+	switch s {
+	case "A", "D", "M", "T", "U", "X", "B":
+		return true
+	}
+	if len(s) == 0 {
+		return false
+	}
+	if s[0] != 'R' && s[0] != 'C' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeNumstatPath(path string) string {
+	path = strings.TrimSpace(path)
+	// rename: "old => new" or "{old => new}" style
+	if i := strings.LastIndex(path, " => "); i >= 0 {
+		return strings.TrimSpace(path[i+4:])
+	}
+	return path
 }
 
 func (e *Executor) DiffCommitFile(ctx context.Context, repo, sha, path string) (DiffResult, error) {

@@ -56,6 +56,39 @@ export type DiffResult = {
   message?: string;
 };
 
+export type BrowseSource = "worktree" | "head";
+
+export type TreeEntry = {
+  name: string;
+  path: string;
+  kind: "file" | "dir" | "symlink";
+  size?: number;
+  linkTarget?: string;
+};
+
+export type TreeListing = {
+  path: string;
+  source: BrowseSource;
+  entries: TreeEntry[];
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  nextOffset?: number;
+  emptyHead?: boolean;
+};
+
+export type FileContent = {
+  path: string;
+  source: BrowseSource;
+  kind: string;
+  mime?: string;
+  size?: number;
+  content?: string;
+  dataUrl?: string;
+  truncated?: boolean;
+  message?: string;
+};
+
 function csrfToken(): string {
   const m = document.cookie.match(/(?:^|; )forkly_csrf=([^;]*)/);
   return m ? decodeURIComponent(m[1]) : "";

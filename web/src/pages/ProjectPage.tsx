@@ -13,9 +13,10 @@ import {
 } from "@phosphor-icons/react";
 import { api, DiffResult, FileStatus, Project, SessionMe, StatusSnapshot } from "../api";
 import { Drawer } from "../Drawer";
+import { ProjectFilesPanel } from "../components/files/ProjectFilesPanel";
 import AddProjectPage from "./AddProjectPage";
 
-type ProjectTab = "changes" | "history";
+type ProjectTab = "files" | "changes" | "history";
 
 type Commit = {
   sha: string;
@@ -39,7 +40,11 @@ export default function ProjectPage() {
   const location = useLocation();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const tab: ProjectTab = location.pathname.endsWith("/history") ? "history" : "changes";
+  const tab: ProjectTab = location.pathname.endsWith("/history")
+    ? "history"
+    : location.pathname.endsWith("/files")
+      ? "files"
+      : "changes";
   const [filter, setFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activePath, setActivePath] = useState<string>("");
@@ -80,7 +85,9 @@ export default function ProjectPage() {
 
   function setTab(next: ProjectTab) {
     const base = `/projects/${id}`;
-    nav(next === "history" ? `${base}/history` : base, { replace: true });
+    if (next === "history") nav(`${base}/history`, { replace: true });
+    else if (next === "files") nav(`${base}/files`, { replace: true });
+    else nav(base, { replace: true });
   }
 
   const project = useQuery({
@@ -119,6 +126,8 @@ export default function ProjectPage() {
         status.refetch({ cancelRefetch: false }),
         qc.invalidateQueries({ queryKey: ["projects"] }),
         activePath ? diff.refetch({ cancelRefetch: false }) : Promise.resolve(),
+        qc.invalidateQueries({ queryKey: ["workspace-tree", id] }),
+        qc.invalidateQueries({ queryKey: ["file-preview", id] }),
       ]);
     } finally {
       const remain = 1000 - (Date.now() - started);
@@ -329,6 +338,9 @@ export default function ProjectPage() {
           </div>
         </div>
         <div className="ml-auto flex rounded-[var(--radius-sm)] bg-[var(--color-canvas-subtle)] p-0.5">
+          <ProjectTabButton active={tab === "files"} onClick={() => setTab("files")}>
+            文件
+          </ProjectTabButton>
           <ProjectTabButton active={tab === "changes"} onClick={() => setTab("changes")}>
             变更
           </ProjectTabButton>
@@ -367,7 +379,9 @@ export default function ProjectPage() {
         </div>
       )}
 
-      {tab === "changes" ? (
+      {tab === "files" ? (
+        <ProjectFilesPanel projectID={id} projectName={project.data?.name || "项目"} />
+      ) : tab === "changes" ? (
         <div className="flex flex-1 min-h-0">
           <section className="w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
             <div className="p-2 flex flex-wrap gap-2 border-b border-[var(--color-border)]">
