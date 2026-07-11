@@ -236,6 +236,15 @@ export default function ProjectPage() {
     [files],
   );
 
+  useEffect(() => {
+    const paths = collectAllFilePaths(changeTree);
+    setActivePath((current) => {
+      if (paths.length === 0) return "";
+      if (current && paths.includes(current)) return current;
+      return paths[0];
+    });
+  }, [changeTree]);
+
   const commit = useMutation({
     mutationFn: () => {
       const paths = new Set<string>();
@@ -728,17 +737,27 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
     enabled: !!selected && !!activeFile,
   });
 
-  const commits = history.data?.commits || [];
-  const historyTree = useMemo(() => buildHistoryTree(commits), [commits]);
+  const commits = history.data?.commits;
+  const historyTree = useMemo(() => buildHistoryTree(commits ?? []), [commits]);
+
+  useEffect(() => {
+    const list = commits ?? [];
+    const shas = new Set(list.map((c) => c.sha));
+    setSelected((current) => {
+      if (shas.size === 0) return "";
+      if (current && shas.has(current)) return current;
+      return firstHistoryCommitSha(historyTree);
+    });
+  }, [commits, historyTree]);
 
   return (
     <div className="flex flex-1 min-h-0">
       <div className="w-[240px] border-r border-[var(--color-border)] overflow-auto py-1">
         {history.isLoading && <p className="p-4 text-sm text-[var(--color-text-secondary)]">加载历史…</p>}
-        {!history.isLoading && commits.length === 0 && (
+        {!history.isLoading && (commits?.length ?? 0) === 0 && (
           <p className="p-4 text-sm text-[var(--color-text-secondary)]">还没有任何版本</p>
         )}
-        {!history.isLoading && commits.length > 0 && (
+        {!history.isLoading && (commits?.length ?? 0) > 0 && (
           <div className="px-2">
             {historyTree.map((node, index) => (
               <HistoryTreeNodeRow
@@ -754,7 +773,9 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
         )}
       </div>
       <div className="flex-1 p-5 overflow-auto">
-        {!selected && <p className="text-[var(--color-text-secondary)]">选择一次提交查看详情</p>}
+        {!selected && !history.isLoading && (
+          <p className="text-[var(--color-text-secondary)]">选择一次提交查看详情</p>
+        )}
         {detail.isLoading && <p className="text-[var(--color-text-secondary)]">加载提交详情…</p>}
         {detail.data && (
           <div>
@@ -868,6 +889,15 @@ function buildHistoryTree(commits: Commit[]): HistoryTreeNode[] {
   }
 
   return toArray(root);
+}
+
+function firstHistoryCommitSha(nodes: HistoryTreeNode[]): string {
+  for (const node of nodes) {
+    if (node.kind === "commit") return node.commit.sha;
+    const nested = firstHistoryCommitSha(node.children);
+    if (nested) return nested;
+  }
+  return "";
 }
 
 function historyDateParts(iso: string): { year: string; month: string; day: string; time: string } {
