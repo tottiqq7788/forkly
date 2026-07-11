@@ -18,6 +18,7 @@ import { MarkdownImage } from "./MarkdownImage";
 import { MarkdownLink, scrollToId } from "./MarkdownLink";
 import { MermaidBlock } from "./MermaidBlock";
 import { remarkForklySupersub } from "./remarkForklySupersub";
+import { forklyUrlTransform } from "./markdownPath";
 import "katex/dist/katex.min.css";
 import "./markdown-preview.css";
 
@@ -131,7 +132,12 @@ export function MarkdownPreviewView({
           <pre>{matter}</pre>
         </details>
       ) : null}
-      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={components}
+        urlTransform={forklyUrlTransform}
+      >
         {body}
       </Markdown>
     </div>

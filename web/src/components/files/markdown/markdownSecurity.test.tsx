@@ -62,4 +62,18 @@ after`);
     const { container } = renderMd(`<svg><script>alert(1)</script></svg>`);
     expect(container.innerHTML).not.toMatch(/<script/i);
   });
+
+  it("keeps safe data image urls through sanitize for MarkdownImage", () => {
+    const data = "data:image/png;base64,iVBORw0KGgo=";
+    const { container } = renderMd(`![x](${data})`);
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe(data);
+  });
+
+  it("still strips dangerous data urls", () => {
+    const { container } = renderMd(`![x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)`);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.innerHTML.toLowerCase()).not.toContain("data:text/html");
+  });
 });

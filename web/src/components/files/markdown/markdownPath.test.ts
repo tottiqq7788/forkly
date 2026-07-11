@@ -4,6 +4,7 @@ import {
   resolveMarkdownImage,
   resolveMarkdownLink,
   parentDirsOf,
+  forklyUrlTransform,
 } from "./markdownPath";
 
 describe("normalizeRepoPath", () => {
@@ -29,6 +30,10 @@ describe("normalizeRepoPath", () => {
     expect(normalizeRepoPath("a.md", "../../etc/passwd")).toBeNull();
     expect(normalizeRepoPath("a.md", "../.git/config")).toBeNull();
     expect(normalizeRepoPath("a.md", ".git/HEAD")).toBeNull();
+    expect(normalizeRepoPath("a.md", ".GIT/config")).toBeNull();
+    expect(normalizeRepoPath("a.md", ".Git/HEAD")).toBeNull();
+    expect(resolveMarkdownLink("a.md", ".GIT/config").kind).toBe("blocked");
+    expect(resolveMarkdownImage("a.md", ".GIT/HEAD").kind).toBe("blocked");
   });
 });
 
@@ -84,5 +89,15 @@ describe("parentDirsOf", () => {
   it("lists ancestors", () => {
     expect(parentDirsOf("a/b/c.md")).toEqual(["a", "a/b"]);
     expect(parentDirsOf("c.md")).toEqual([]);
+  });
+});
+
+describe("forklyUrlTransform", () => {
+  it("keeps safe data images and strips dangerous schemes", () => {
+    expect(forklyUrlTransform("data:image/png;base64,aaaa")).toBe("data:image/png;base64,aaaa");
+    expect(forklyUrlTransform("https://cdn.example/a.png")).toBe("https://cdn.example/a.png");
+    expect(forklyUrlTransform("./rel.png")).toBe("./rel.png");
+    expect(forklyUrlTransform("javascript:alert(1)")).toBe("");
+    expect(forklyUrlTransform("data:text/html;base64,xxxx")).toBe("");
   });
 });

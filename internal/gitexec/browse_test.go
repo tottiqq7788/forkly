@@ -147,6 +147,12 @@ func TestBrowseRejectsEscapeAndGit(t *testing.T) {
 	if _, err := e.ReadContent(context.Background(), dir, SourceHead, ".git/config"); err == nil {
 		t.Fatal("expected .git reject for head")
 	}
+	if _, err := e.ReadContent(context.Background(), dir, SourceWorktree, ".GIT/config"); err == nil {
+		t.Fatal("expected .GIT reject")
+	}
+	if _, err := e.ReadContent(context.Background(), dir, SourceHead, ".Git/HEAD"); err == nil {
+		t.Fatal("expected .Git reject for head")
+	}
 }
 
 func TestBrowseRejectsOutsideSymlink(t *testing.T) {
@@ -227,6 +233,9 @@ func TestNormalizeBrowsePath(t *testing.T) {
 	}
 	if _, err := normalizeBrowsePath(".git/HEAD"); err == nil {
 		t.Fatal("expected .git error")
+	}
+	if _, err := normalizeBrowsePath(".GIT/config"); err == nil {
+		t.Fatal("expected .GIT error")
 	}
 	if _, err := normalizeBrowsePath("-rf"); err == nil {
 		t.Fatal("expected dash path error")

@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CaretRight, File as FileIcon, FolderSimple, LinkSimple } from "@phosphor-icons/react";
 import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
 import { FilePreviewView } from "./FilePreviewView";
-import { parentDirsOf } from "./markdown/markdownPath";
+import { isGitMetaPath, parentDirsOf } from "./markdown/markdownPath";
 
 type Props = {
   projectID: string;
@@ -187,6 +187,7 @@ export function ProjectFilesPanel({
   }
 
   function openFromMarkdown(path: string, fragment?: string) {
+    if (isGitMetaPath(path)) return;
     const parents = parentDirsOf(path);
     if (parents.length > 0) expandDirs(parents);
     setPendingFragment(fragment || "");

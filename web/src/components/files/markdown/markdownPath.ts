@@ -33,6 +33,27 @@ export type ResolvedImage =
 
 const SAFE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/]+=*$/i;
 
+/** Keep relative/https URLs; also allow safe data-image URLs for Markdown images. */
+export function forklyUrlTransform(url: string): string {
+  const compact = (url || "").replace(/\s+/g, "");
+  if (SAFE_IMAGE_DATA.test(compact)) return compact;
+  // Same allowlist as react-markdown default (no data:/javascript:).
+  const colon = url.indexOf(":");
+  const questionMark = url.indexOf("?");
+  const numberSign = url.indexOf("#");
+  const slash = url.indexOf("/");
+  if (
+    colon === -1 ||
+    (slash !== -1 && colon > slash) ||
+    (questionMark !== -1 && colon > questionMark) ||
+    (numberSign !== -1 && colon > numberSign) ||
+    /^(https?|ircs?|mailto|xmpp)$/i.test(url.slice(0, colon))
+  ) {
+    return url;
+  }
+  return "";
+}
+
 function dirname(path: string): string {
   const i = path.lastIndexOf("/");
   return i <= 0 ? "" : path.slice(0, i);
@@ -44,6 +65,12 @@ function decodeMaybe(part: string): string {
   } catch {
     return part;
   }
+}
+
+/** Case-insensitive `.git` / `.git/...` (macOS APFS default is case-insensitive). */
+export function isGitMetaPath(rel: string): boolean {
+  const lower = rel.replace(/\\/g, "/").toLowerCase();
+  return lower === ".git" || lower.startsWith(".git/");
 }
 
 /** Normalize a repo-relative path. Leading `/` means project root, not OS absolute. */
@@ -73,13 +100,13 @@ export function normalizeRepoPath(ownerPath: string, rawHref: string): string | 
       continue;
     }
     if (segment.startsWith("-")) return null;
-    if (segment === ".git" || segment.startsWith(".git/")) return null;
+    if (segment.toLowerCase() === ".git") return null;
     parts.push(segment);
   }
 
   const joined = parts.join("/");
   if (!joined) return null;
-  if (joined === ".git" || joined.startsWith(".git/")) return null;
+  if (isGitMetaPath(joined)) return null;
   return joined;
 }
 

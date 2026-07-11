@@ -35,6 +35,7 @@ export const markdownSanitizeSchema: Schema = {
   protocols: {
     ...defaultSchema.protocols,
     href: ["http", "https", "mailto"],
-    src: ["http", "https"],
+    // `data` kept for safe `data:image/...;base64,...`; MarkdownImage still enforces MIME whitelist.
+    src: ["http", "https", "data"],
   },
 };

@@ -198,7 +198,8 @@ func normalizeBrowsePath(rel string) (string, error) {
 
 func isGitMetaPath(rel string) bool {
 	rel = filepath.ToSlash(rel)
-	return rel == ".git" || strings.HasPrefix(rel, ".git/")
+	lower := strings.ToLower(rel)
+	return lower == ".git" || strings.HasPrefix(lower, ".git/")
 }
 
 func relOrDot(rel string) string {
@@ -277,7 +278,7 @@ func (e *Executor) listWorktreeDir(repo, rel string) ([]TreeEntry, error) {
 	out := make([]TreeEntry, 0, len(ents))
 	for _, ent := range ents {
 		name := ent.Name()
-		if name == ".git" {
+		if strings.EqualFold(name, ".git") {
 			continue
 		}
 		childRel := name

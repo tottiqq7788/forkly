@@ -67,10 +67,11 @@ export function scrollToId(id: string, root?: HTMLElement | null) {
       return id;
     }
   })();
-  const scope = root ?? document;
-  const el =
-    (scope instanceof Document ? scope : scope.ownerDocument)?.getElementById(decoded) ??
-    scope.querySelector?.(`[id="${CSS.escape(decoded)}"]`);
+  const escaped = CSS.escape(decoded);
+  // Prefer the preview root so same-id headings outside the markdown pane are ignored.
+  const el = root
+    ? root.querySelector(`#${escaped}`) ?? root.querySelector(`[id="${escaped}"]`)
+    : document.getElementById(decoded);
   if (el && "scrollIntoView" in el) {
     (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
   }
