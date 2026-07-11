@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CaretRight, File as FileIcon, FolderSimple, LinkSimple } from "@phosphor-icons/react";
 import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
 import { FilePreviewView } from "./FilePreviewView";
+import { parentDirsOf } from "./markdown/markdownPath";
 
 type Props = {
   projectID: string;
@@ -38,6 +39,7 @@ export function ProjectFilesPanel({
     head: { path: "" },
   });
   const [loadedDirs, setLoadedDirs] = useState<Record<string, TreeEntry[]>>({});
+  const [pendingFragment, setPendingFragment] = useState("");
   const knownBranchKey = useRef("");
 
   const expanded = expandedBySource[source];
@@ -179,6 +181,15 @@ export function ProjectFilesPanel({
   });
 
   function selectFile(path: string) {
+    setPendingFragment("");
+    setSelection((prev) => ({ ...prev, [source]: { path } }));
+    onPathChange?.(path);
+  }
+
+  function openFromMarkdown(path: string, fragment?: string) {
+    const parents = parentDirsOf(path);
+    if (parents.length > 0) expandDirs(parents);
+    setPendingFragment(fragment || "");
     setSelection((prev) => ({ ...prev, [source]: { path } }));
     onPathChange?.(path);
   }
@@ -258,7 +269,15 @@ export function ProjectFilesPanel({
         {activePath && preview.isError && (
           <p className="text-sm text-[var(--color-error-fg)]">{(preview.error as Error).message}</p>
         )}
-        {activePath && preview.data && <FilePreviewView file={preview.data} />}
+        {activePath && preview.data && (
+          <FilePreviewView
+            file={preview.data}
+            projectID={projectID}
+            onOpenPath={openFromMarkdown}
+            pendingFragment={pendingFragment}
+            onFragmentConsumed={() => setPendingFragment("")}
+          />
+        )}
       </section>
     </div>
   );

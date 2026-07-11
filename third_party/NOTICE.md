@@ -19,3 +19,22 @@ for the corresponding Git version must remain available to recipients.
 
 - License: BSD-3-Clause
 - https://github.com/fsnotify/fsnotify
+
+## Markdown preview (web UI)
+
+Runtime packages used by the project file Markdown preview:
+
+- `react-markdown` — MIT — https://github.com/remarkjs/react-markdown
+- `remark-gfm` — MIT — https://github.com/remarkjs/remark-gfm
+- `remark-math` — MIT — https://github.com/remarkjs/remark-math
+- `remark-emoji` — MIT — https://github.com/rhysd/remark-emoji
+- `remark-cjk-friendly` — MIT — https://github.com/tats-u/markdown-cjk-friendly
+- `rehype-raw` / `rehype-sanitize` / `rehype-slug` / `rehype-katex` / `rehype-highlight` — MIT
+- `katex` — MIT — https://github.com/KaTeX/KaTeX
+- `mermaid` — MIT — https://github.com/mermaid-js/mermaid
+- `dompurify` — MPL-2.0 OR Apache-2.0 — https://github.com/cure53/DOMPurify
+- `highlight.js` (via `rehype-highlight` / `lowlight`) — BSD-3-Clause
+
+Design inspiration for export-style security, Mermaid strict mode, and relative
+asset rewriting was taken from MarkText / `@muyajs/core` (MIT); Forkly does not
+bundle the MarkText editor runtime.

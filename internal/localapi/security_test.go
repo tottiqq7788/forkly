@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/forkly-app/forkly/internal/app"
@@ -180,4 +181,44 @@ func TestProjectRevealRequiresCSRF(t *testing.T) {
 func mustJSONString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func TestSecurityHeadersAllowHttpsImages(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr, shutdown, _, err := app.RunServerOnly(ctx, log, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	req, err := http.NewRequest(http.MethodGet, addr+"/local-api/v1/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "127.0.0.1"
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	csp := res.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "img-src 'self' data: blob: https:") {
+		t.Fatalf("expected https in img-src, got %q", csp)
+	}
+	if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-eval") {
+		t.Fatalf("script-src must stay self without unsafe-eval: %q", csp)
+	}
+	if !strings.Contains(csp, "connect-src 'self'") {
+		t.Fatalf("connect-src must include self: %q", csp)
+	}
+	// Ensure we did not open remote script/connect.
+	if strings.Contains(csp, "script-src 'self' https:") || strings.Contains(csp, "connect-src 'self' https:") {
+		t.Fatalf("must not allow remote script/connect: %q", csp)
+	}
 }
