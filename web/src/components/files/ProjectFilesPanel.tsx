@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CaretRight, File as FileIcon, FolderSimple, LinkSimple } from "@phosphor-icons/react";
 import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
@@ -8,6 +8,9 @@ type Props = {
   projectID: string;
   projectName: string;
   branchKey?: string;
+  /** From URL on refresh; empty when entering the tab so we default to the first file. */
+  preferredPath?: string;
+  onPathChange?: (path: string) => void;
 };
 
 type SourceSelection = {
@@ -21,22 +24,50 @@ function emptyExpandedBySource(): Record<BrowseSource, Set<string>> {
   };
 }
 
-export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Props) {
+export function ProjectFilesPanel({
+  projectID,
+  projectName,
+  branchKey = "",
+  preferredPath = "",
+  onPathChange,
+}: Props) {
   const [source, setSource] = useState<BrowseSource>("worktree");
   const [expandedBySource, setExpandedBySource] = useState(emptyExpandedBySource);
   const [selection, setSelection] = useState<Record<BrowseSource, SourceSelection>>({
     worktree: { path: "" },
     head: { path: "" },
   });
+  const [loadedDirs, setLoadedDirs] = useState<Record<string, TreeEntry[]>>({});
+  const knownBranchKey = useRef("");
 
   const expanded = expandedBySource[source];
   const activePath = selection[source].path;
 
   useEffect(() => {
+    knownBranchKey.current = "";
     setExpandedBySource(emptyExpandedBySource());
     setSelection({ worktree: { path: "" }, head: { path: "" } });
     setSource("worktree");
-  }, [projectID, branchKey]);
+    setLoadedDirs({});
+  }, [projectID]);
+
+  useEffect(() => {
+    if (!branchKey) return;
+    // First time we learn the branch after mount — keep cascade expand, don't wipe.
+    if (!knownBranchKey.current) {
+      knownBranchKey.current = branchKey;
+      return;
+    }
+    if (knownBranchKey.current === branchKey) return;
+    knownBranchKey.current = branchKey;
+    setExpandedBySource(emptyExpandedBySource());
+    setSelection({ worktree: { path: "" }, head: { path: "" } });
+    setLoadedDirs({});
+  }, [branchKey]);
+
+  useEffect(() => {
+    setLoadedDirs({});
+  }, [source]);
 
   const expandDirs = useCallback(
     (paths: string[]) => {
@@ -57,6 +88,21 @@ export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Pr
     },
     [source],
   );
+
+  const reportEntries = useCallback((dirPath: string, entries: TreeEntry[]) => {
+    setLoadedDirs((prev) => {
+      const old = prev[dirPath];
+      if (
+        old &&
+        old.length === entries.length &&
+        old.every((entry, index) => entry.path === entries[index]?.path && entry.kind === entries[index]?.kind)
+      ) {
+        return prev;
+      }
+      return { ...prev, [dirPath]: entries };
+    });
+  }, []);
+
   const rootQuery = useInfiniteQuery({
     queryKey: ["workspace-tree", projectID, source, ""],
     initialPageParam: 0,
@@ -75,7 +121,12 @@ export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Pr
 
   useEffect(() => {
     expandDirs(dirPaths(rootEntries));
-  }, [expandDirs, rootEntries]);
+  }, [expandDirs, rootEntries, projectID, branchKey]);
+
+  useEffect(() => {
+    if (rootQuery.isLoading && !rootQuery.data) return;
+    reportEntries("", rootEntries);
+  }, [reportEntries, rootEntries, rootQuery.data, rootQuery.isLoading]);
 
   useEffect(() => {
     if (rootQuery.hasNextPage && !rootQuery.isFetchingNextPage) {
@@ -84,14 +135,39 @@ export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Pr
   }, [rootQuery.hasNextPage, rootQuery.isFetchingNextPage, rootQuery.data, rootQuery.fetchNextPage]);
 
   useEffect(() => {
-    if (activePath) return;
     if (rootQuery.isLoading || rootQuery.isError) return;
     if (emptyHead && source === "head") return;
-    const firstFile = findFirstFile(rootEntries);
+
+    if (preferredPath) {
+      const preferredKnown = pathKnownInTree(preferredPath, loadedDirs);
+      if (preferredKnown === "unknown") return;
+      if (preferredKnown === "yes") {
+        if (activePath !== preferredPath) {
+          setSelection((prev) => ({ ...prev, [source]: { path: preferredPath } }));
+        }
+        return;
+      }
+      // preferred path missing in tree — fall through to first file
+    }
+
+    if (activePath) {
+      const activeKnown = pathKnownInTree(activePath, loadedDirs);
+      if (activeKnown === "yes" || activeKnown === "unknown") return;
+    }
+
+    const firstFile = findFirstFileDFS(loadedDirs[""] ?? [], loadedDirs);
     if (firstFile) {
       setSelection((prev) => ({ ...prev, [source]: { path: firstFile } }));
     }
-  }, [activePath, emptyHead, rootEntries, rootQuery.isError, rootQuery.isLoading, source]);
+  }, [
+    activePath,
+    emptyHead,
+    loadedDirs,
+    preferredPath,
+    rootQuery.isError,
+    rootQuery.isLoading,
+    source,
+  ]);
 
   const preview = useQuery({
     queryKey: ["file-preview", projectID, source, activePath],
@@ -104,6 +180,7 @@ export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Pr
 
   function selectFile(path: string) {
     setSelection((prev) => ({ ...prev, [source]: { path } }));
+    onPathChange?.(path);
   }
 
   function toggleDir(path: string) {
@@ -159,6 +236,7 @@ export function ProjectFilesPanel({ projectID, projectName, branchKey = "" }: Pr
                     activePath={activePath}
                     onToggleDir={toggleDir}
                     onExpandDirs={expandDirs}
+                    onEntriesLoaded={reportEntries}
                     onSelectFile={selectFile}
                   />
                 ))
@@ -214,11 +292,39 @@ function dirPaths(entries: TreeEntry[]): string[] {
   return entries.filter((entry) => entry.kind === "dir").map((entry) => entry.path);
 }
 
-function findFirstFile(entries: TreeEntry[]): string {
+/** Depth-first first file: enter dirs before later siblings; wait if a dir is not loaded yet. */
+function findFirstFileDFS(entries: TreeEntry[], loaded: Record<string, TreeEntry[]>): string {
   for (const entry of entries) {
     if (entry.kind === "file") return entry.path;
+    if (entry.kind === "dir") {
+      const children = loaded[entry.path];
+      // Dir listed before sibling files must be fully walked first.
+      if (!children) return "";
+      const found = findFirstFileDFS(children, loaded);
+      if (found) return found;
+    }
   }
   return "";
+}
+
+/** Whether `path` is known to exist as a file/symlink in the loaded tree. */
+function pathKnownInTree(path: string, loaded: Record<string, TreeEntry[]>): "yes" | "no" | "unknown" {
+  if (!path) return "no";
+  const parts = path.split("/").filter(Boolean);
+  let dir = "";
+  for (let i = 0; i < parts.length; i++) {
+    const entries = loaded[dir];
+    if (!entries) return "unknown";
+    const full = dir ? `${dir}/${parts[i]}` : parts[i]!;
+    const entry = entries.find((e) => e.path === full);
+    if (!entry) return "no";
+    if (i === parts.length - 1) {
+      return entry.kind === "file" || entry.kind === "symlink" ? "yes" : "no";
+    }
+    if (entry.kind !== "dir") return "no";
+    dir = full;
+  }
+  return "no";
 }
 
 function TreeNode({
@@ -230,6 +336,7 @@ function TreeNode({
   activePath,
   onToggleDir,
   onExpandDirs,
+  onEntriesLoaded,
   onSelectFile,
 }: {
   projectID: string;
@@ -240,6 +347,7 @@ function TreeNode({
   activePath: string;
   onToggleDir: (path: string) => void;
   onExpandDirs: (paths: string[]) => void;
+  onEntriesLoaded: (dirPath: string, entries: TreeEntry[]) => void;
   onSelectFile: (path: string) => void;
 }) {
   const isDir = entry.kind === "dir";
@@ -266,6 +374,13 @@ function TreeNode({
     if (!isOpen) return;
     onExpandDirs(dirPaths(childEntries));
   }, [childEntries, isOpen, onExpandDirs]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    // Avoid treating "still loading" as an empty directory (would skip into later siblings).
+    if (childQuery.isLoading && !childQuery.data) return;
+    onEntriesLoaded(entry.path, childEntries);
+  }, [childEntries, childQuery.data, childQuery.isLoading, entry.path, isOpen, onEntriesLoaded]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -342,6 +457,7 @@ function TreeNode({
               activePath={activePath}
               onToggleDir={onToggleDir}
               onExpandDirs={onExpandDirs}
+              onEntriesLoaded={onEntriesLoaded}
               onSelectFile={onSelectFile}
             />
           ))}

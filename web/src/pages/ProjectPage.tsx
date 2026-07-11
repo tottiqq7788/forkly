@@ -95,10 +95,30 @@ export default function ProjectPage() {
 
   function setTab(next: ProjectTab) {
     const base = `/projects/${id}`;
+    // Leaving a tab: clear selection so returning defaults to the first item.
+    setActivePath("");
     if (next === "history") nav(`${base}/history`, { replace: true });
     else if (next === "changes") nav(`${base}/changes`, { replace: true });
     else nav(base, { replace: true });
   }
+
+  function selectionFromSearch(key: string): string {
+    return new URLSearchParams(location.search).get(key) || "";
+  }
+
+  function replaceSelectionParam(key: string, value: string) {
+    const params = new URLSearchParams(location.search);
+    if (value) params.set(key, value);
+    else params.delete(key);
+    const search = params.toString();
+    nav(
+      { pathname: location.pathname, search: search ? `?${search}` : "" },
+      { replace: true },
+    );
+  }
+
+  const pathFromUrl = selectionFromSearch("path");
+  const shaFromUrl = selectionFromSearch("sha");
 
   const project = useQuery({
     queryKey: ["project", id],
@@ -293,10 +313,16 @@ export default function ProjectPage() {
     const paths = collectAllFilePaths(changeTree);
     setActivePath((current) => {
       if (paths.length === 0) return "";
+      if (pathFromUrl && paths.includes(pathFromUrl)) return pathFromUrl;
       if (current && paths.includes(current)) return current;
       return paths[0];
     });
-  }, [changeTree]);
+  }, [changeTree, pathFromUrl]);
+
+  function openChangePath(path: string) {
+    setActivePath(path);
+    replaceSelectionParam("path", path);
+  }
 
   const commit = useMutation({
     mutationFn: () => {
@@ -442,6 +468,8 @@ export default function ProjectPage() {
           projectID={id}
           projectName={project.data?.name || "项目"}
           branchKey={filesBranchKey || health?.branch || ""}
+          preferredPath={tab === "files" ? pathFromUrl : ""}
+          onPathChange={(path) => replaceSelectionParam("path", path)}
         />
       ) : tab === "changes" ? (
         <div className="flex flex-1 min-h-0">
@@ -494,7 +522,7 @@ export default function ProjectPage() {
                     }
                     setSelected(next);
                   }}
-                  onOpen={setActivePath}
+                  onOpen={openChangePath}
                 />
               )}
             </div>
@@ -513,7 +541,7 @@ export default function ProjectPage() {
           </section>
         </div>
       ) : (
-        <ProjectHistoryPanel projectID={id} />
+        <ProjectHistoryPanel projectID={id} preferredSha={shaFromUrl} onShaChange={(sha) => replaceSelectionParam("sha", sha)} />
       )}
 
       {commitOpen && (
@@ -824,7 +852,15 @@ type HistoryTreeNode =
       timeLabel: string;
     };
 
-function ProjectHistoryPanel({ projectID }: { projectID: string }) {
+function ProjectHistoryPanel({
+  projectID,
+  preferredSha = "",
+  onShaChange,
+}: {
+  projectID: string;
+  preferredSha?: string;
+  onShaChange?: (sha: string) => void;
+}) {
   const [selected, setSelected] = useState("");
   const [activeFile, setActiveFile] = useState("");
   useEffect(() => {
@@ -861,11 +897,16 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
     const shas = new Set(list.map((c) => c.sha));
     setSelected((current) => {
       if (shas.size === 0) return "";
+      if (preferredSha && shas.has(preferredSha)) return preferredSha;
       if (current && shas.has(current)) return current;
       return firstHistoryCommitSha(historyTree);
     });
-  }, [commits, historyTree]);
+  }, [commits, historyTree, preferredSha]);
 
+  function selectCommit(sha: string) {
+    setSelected(sha);
+    onShaChange?.(sha);
+  }
   return (
     <div className="flex flex-1 min-h-0">
       <div className="w-[240px] border-r border-[var(--color-border)] overflow-auto py-1">
@@ -882,7 +923,7 @@ function ProjectHistoryPanel({ projectID }: { projectID: string }) {
                 isLast={index === historyTree.length - 1}
                 ancestorContinues={[]}
                 selected={selected}
-                onSelect={setSelected}
+                onSelect={selectCommit}
               />
             ))}
           </div>
