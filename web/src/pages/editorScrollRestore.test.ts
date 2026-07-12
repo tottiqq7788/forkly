@@ -36,32 +36,34 @@ describe("editorScrollRestore", () => {
     vi.restoreAllMocks();
   });
 
-  it("builds a stable storage key from project and path", () => {
-    expect(editorScrollStorageKey("p1", "docs/a.md")).toBe("forkly:md-editor-scroll:p1:docs/a.md");
+  it("builds a stable storage key from scope and path", () => {
+    expect(editorScrollStorageKey("project:p1", "docs/a.md")).toBe(
+      "forkly:md-editor-scroll:project:p1:docs/a.md",
+    );
   });
 
   it("round-trips snapshots through Storage", () => {
     const store = new Map<string, string>();
     const storage = makeStorage(store);
 
-    writeEditorScrollSnapshot(storage, "p1", "a.md", {
+    writeEditorScrollSnapshot(storage, "local:file-1", "a.md", {
       top: 420,
       scrollHeight: 2000,
       slug: "heading",
     });
-    expect(readEditorScrollSnapshot(storage, "p1", "a.md")).toEqual({
+    expect(readEditorScrollSnapshot(storage, "local:file-1", "a.md")).toEqual({
       top: 420,
       scrollHeight: 2000,
       slug: "heading",
     });
-    clearEditorScrollSnapshot(storage, "p1", "a.md");
-    expect(readEditorScrollSnapshot(storage, "p1", "a.md")).toBeNull();
+    clearEditorScrollSnapshot(storage, "local:file-1", "a.md");
+    expect(readEditorScrollSnapshot(storage, "local:file-1", "a.md")).toBeNull();
   });
 
   it("rejects invalid stored payloads", () => {
-    const store = new Map<string, string>([[editorScrollStorageKey("p1", "a.md"), "{bad"]]);
+    const store = new Map<string, string>([[editorScrollStorageKey("project:p1", "a.md"), "{bad"]]);
     const storage = makeStorage(store);
-    expect(readEditorScrollSnapshot(storage, "p1", "a.md")).toBeNull();
+    expect(readEditorScrollSnapshot(storage, "project:p1", "a.md")).toBeNull();
   });
 
   it("keeps absolute top when height is stable", () => {

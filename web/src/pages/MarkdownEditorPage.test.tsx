@@ -1,11 +1,13 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { MarkdownSaveGuardProvider } from "../components/files/markdown/MarkdownSaveGuard";
 
 const fetchSessionMe = vi.fn();
 const fetchFileContent = vi.fn();
+const fetchLocalFileContent = vi.fn();
+const openLocalRelativeFile = vi.fn();
 const apiMock = vi.fn();
 const editorUndo = vi.fn();
 const editorRedo = vi.fn();
@@ -19,6 +21,8 @@ vi.mock("../api", async () => {
     ...actual,
     fetchSessionMe: (...args: unknown[]) => fetchSessionMe(...args),
     fetchFileContent: (...args: unknown[]) => fetchFileContent(...args),
+    fetchLocalFileContent: (...args: unknown[]) => fetchLocalFileContent(...args),
+    openLocalRelativeFile: (...args: unknown[]) => openLocalRelativeFile(...args),
     api: (...args: unknown[]) => apiMock(...args),
   };
 });
@@ -29,9 +33,11 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
     {
       onTocChange,
       onReady,
+      onOpenPath,
     }: {
       onTocChange?: (toc: { content: string; lvl: number; slug: string; githubSlug: string }[]) => void;
       onReady?: () => void;
+      onOpenPath?: (path: string) => void;
     },
     ref: React.Ref<unknown>,
   ) {
@@ -59,12 +65,18 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
       "div",
       { "data-testid": "fake-editor", className: "forkly-markdown-editor" },
       "editor",
+      React.createElement(
+        "button",
+        { type: "button", onClick: () => onOpenPath?.("docs/next.md") },
+        "open relative markdown",
+      ),
     );
   });
   return { MarkdownEditorView: Fake };
 });
 
 const { default: MarkdownEditorPage } = await import("./MarkdownEditorPage");
+const { default: LocalMarkdownEditorPage } = await import("./LocalMarkdownEditorPage");
 
 function renderAt(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -88,11 +100,35 @@ function renderAt(path: string) {
   );
 }
 
+function renderLocalAt(path: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/editor/local/:fileId",
+        element: (
+          <MarkdownSaveGuardProvider>
+            <LocalMarkdownEditorPage />
+          </MarkdownSaveGuardProvider>
+        ),
+      },
+    ],
+    { initialEntries: [path] },
+  );
+  return render(
+    <QueryClientProvider client={qc}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("MarkdownEditorPage", () => {
   beforeEach(() => {
     sessionStorage.clear();
     fetchSessionMe.mockReset();
     fetchFileContent.mockReset();
+    fetchLocalFileContent.mockReset();
+    openLocalRelativeFile.mockReset();
     apiMock.mockReset();
     editorUndo.mockReset();
     editorRedo.mockReset();
@@ -102,6 +138,10 @@ describe("MarkdownEditorPage", () => {
     editorFind.mockReturnValue({ matches: [], index: -1 });
     fetchSessionMe.mockResolvedValue({ user: "dev" });
     apiMock.mockResolvedValue({ id: "p1", name: "demo" });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("rejects missing path", async () => {
@@ -204,7 +244,7 @@ describe("MarkdownEditorPage", () => {
 
   it("restores the editor scroll position after refresh for the same file", async () => {
     sessionStorage.setItem(
-      "forkly:md-editor-scroll:p1:docs/a.md",
+      "forkly:md-editor-scroll:project:p1:docs/a.md",
       JSON.stringify({ top: 480, scrollHeight: 2000 }),
     );
     fetchFileContent.mockResolvedValue({
@@ -226,6 +266,94 @@ describe("MarkdownEditorPage", () => {
 
     await waitFor(() => {
       expect(scrollRoot.scrollTop).toBe(480);
+    });
+  });
+
+  it("opens project relative markdown links through the project editor route", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    fireEvent.click(await screen.findByRole("button", { name: "open relative markdown" }));
+
+    await waitFor(() => {
+      expect(open).toHaveBeenCalledWith(
+        "/projects/p1/editor?path=docs%2Fnext.md",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    });
+  });
+
+  it("renders local markdown editor chrome with local file labels", async () => {
+    fetchLocalFileContent.mockResolvedValue({
+      fileId: "lf1",
+      name: "note.md",
+      displayPath: "Notes/note.md",
+      absPath: "/Users/me/Notes/note.md",
+      parentName: "Notes",
+      path: "note.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Local",
+      editable: true,
+      revision: "local-rev",
+      size: 7,
+    });
+
+    renderLocalAt("/editor/local/lf1");
+
+    expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
+    expect(screen.getByText("本地文件")).toBeInTheDocument();
+    const displayPath = screen.getByText("Notes/note.md");
+    expect(displayPath).toBeInTheDocument();
+    expect(displayPath.closest(".forkly-md-editor-path")).toHaveAttribute(
+      "title",
+      "/Users/me/Notes/note.md",
+    );
+    expect(document.title).toBe("note.md · Forkly");
+  });
+
+  it("opens local relative markdown links through a new local file session", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    fetchLocalFileContent.mockResolvedValue({
+      fileId: "lf1",
+      name: "note.md",
+      displayPath: "Notes/note.md",
+      absPath: "/Users/me/Notes/note.md",
+      parentName: "Notes",
+      path: "note.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Local",
+      editable: true,
+      revision: "local-rev",
+      size: 7,
+    });
+    openLocalRelativeFile.mockResolvedValue({
+      fileId: "lf2",
+      name: "next.md",
+      displayPath: "Notes/next.md",
+      absPath: "/Users/me/Notes/next.md",
+      parentName: "Notes",
+      editable: true,
+      revision: "next-rev",
+      size: 8,
+    });
+
+    renderLocalAt("/editor/local/lf1");
+    fireEvent.click(await screen.findByRole("button", { name: "open relative markdown" }));
+
+    await waitFor(() => {
+      expect(openLocalRelativeFile).toHaveBeenCalledWith("lf1", "docs/next.md");
+      expect(open).toHaveBeenCalledWith("/editor/local/lf2", "_blank", "noopener,noreferrer");
     });
   });
 });

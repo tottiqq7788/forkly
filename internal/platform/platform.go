@@ -21,6 +21,14 @@ type RevealInFinder interface {
 type SingleInstance interface {
 	Acquire() (acquired bool, err error)
 	Release() error
-	NotifyExisting(message string) error
-	Listen(handler func(message string))
+	NotifyExisting(message InstanceMessage) error
+	Listen(handler func(message InstanceMessage))
+}
+
+// OpenFilesReceiver collects document paths opened via the OS (file association).
+type OpenFilesReceiver interface {
+	// CollectLaunchOpenFiles returns paths from the launch Open Documents event, if any.
+	CollectLaunchOpenFiles() []string
+	// StartOpenFilesWatcher registers for subsequent Open Documents events.
+	StartOpenFilesWatcher(handler func(paths []string))
 }

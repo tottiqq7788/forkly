@@ -5,7 +5,7 @@ import {
   useRef,
   type CSSProperties,
 } from "react";
-import { assetURL, uploadMarkdownAsset } from "../../../api";
+import type { UploadAssetResult } from "../../../api";
 import { copyHeadingAnchor } from "./copyHeadingAnchor";
 import { resolveMarkdownImage, resolveMarkdownLink } from "./markdownPath";
 import "./markdown-editor.css";
@@ -49,8 +49,10 @@ export type SearchResult = {
 
 type Props = {
   markdown: string;
-  projectID: string;
+  documentKey: string;
   markdownPath: string;
+  assetURL: (relPath: string) => string;
+  uploadAsset: (file: Blob, filename?: string) => Promise<UploadAssetResult>;
   hidden?: boolean;
   /** When false, ignore markdown prop updates (avoids setContent clearing undo during dirty autosave races). */
   syncExternalContent?: boolean;
@@ -169,8 +171,10 @@ function stripPlantUMLFromQuickInsert(muya: MuyaInstance) {
 export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(function MarkdownEditorView(
   {
     markdown,
-    projectID,
+    documentKey,
     markdownPath,
+    assetURL,
+    uploadAsset,
     hidden = false,
     syncExternalContent = true,
     onChange,
@@ -192,8 +196,10 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
   onTocChangeRef.current = onTocChange;
   const onOpenPathRef = useRef(onOpenPath);
   onOpenPathRef.current = onOpenPath;
-  const projectIDRef = useRef(projectID);
-  projectIDRef.current = projectID;
+  const assetURLRef = useRef(assetURL);
+  assetURLRef.current = assetURL;
+  const uploadAssetRef = useRef(uploadAsset);
+  uploadAssetRef.current = uploadAsset;
   const pathRef = useRef(markdownPath);
   pathRef.current = markdownPath;
 
@@ -347,7 +353,7 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
             }
             const resolved = resolveMarkdownImage(pathRef.current, raw);
             if (resolved.kind === "repo") {
-              return assetURL(projectIDRef.current, "worktree", resolved.path);
+              return assetURLRef.current(resolved.path);
             }
             if (resolved.kind === "remote" || resolved.kind === "data") {
               return resolved.href;
@@ -379,12 +385,7 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
             if (!blob || !/^(image\/(png|jpe?g|gif|webp))$/i.test(blob.type)) {
               throw new Error("仅支持 PNG/JPEG/GIF/WebP 图片上传");
             }
-            const uploaded = await uploadMarkdownAsset(
-              projectIDRef.current,
-              pathRef.current,
-              blob,
-              filename,
-            );
+            const uploaded = await uploadAssetRef.current(blob, filename);
             return uploaded.relativePath;
           },
           getPathForFile: () => "",
@@ -464,9 +465,9 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
       if (mount.parentNode) mount.parentNode.removeChild(mount);
       mountRef.current = null;
     };
-    // Mount once per path/project; content updates go through setContent.
+    // Mount once per document; content updates go through setContent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectID, markdownPath]);
+  }, [documentKey, markdownPath]);
 
   // Sync external draft reloads (discard / remote poll) into Muya.
   // Gate with a ref so flipping dirty→clean alone does not re-run setContent

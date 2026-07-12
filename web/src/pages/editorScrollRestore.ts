@@ -6,17 +6,17 @@ export type EditorScrollSnapshot = {
   slug?: string;
 };
 
-export function editorScrollStorageKey(projectID: string, path: string): string {
-  return `forkly:md-editor-scroll:${projectID}:${path}`;
+export function editorScrollStorageKey(scopeKey: string, path: string): string {
+  return `forkly:md-editor-scroll:${scopeKey}:${path}`;
 }
 
 export function readEditorScrollSnapshot(
   storage: Storage,
-  projectID: string,
+  scopeKey: string,
   path: string,
 ): EditorScrollSnapshot | null {
   try {
-    const raw = storage.getItem(editorScrollStorageKey(projectID, path));
+    const raw = storage.getItem(editorScrollStorageKey(scopeKey, path));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<EditorScrollSnapshot>;
     if (typeof parsed.top !== "number" || !Number.isFinite(parsed.top) || parsed.top < 0) {
@@ -35,20 +35,20 @@ export function readEditorScrollSnapshot(
 
 export function writeEditorScrollSnapshot(
   storage: Storage,
-  projectID: string,
+  scopeKey: string,
   path: string,
   snapshot: EditorScrollSnapshot,
 ): void {
   try {
-    storage.setItem(editorScrollStorageKey(projectID, path), JSON.stringify(snapshot));
+    storage.setItem(editorScrollStorageKey(scopeKey, path), JSON.stringify(snapshot));
   } catch {
     // Quota / private mode — ignore.
   }
 }
 
-export function clearEditorScrollSnapshot(storage: Storage, projectID: string, path: string): void {
+export function clearEditorScrollSnapshot(storage: Storage, scopeKey: string, path: string): void {
   try {
-    storage.removeItem(editorScrollStorageKey(projectID, path));
+    storage.removeItem(editorScrollStorageKey(scopeKey, path));
   } catch {
     // ignore
   }

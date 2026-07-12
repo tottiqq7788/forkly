@@ -3,18 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileContent } from "../../../api";
 import { APIError } from "../../../api";
 import { useMarkdownDocument } from "./useMarkdownDocument";
+import type { DocumentTransport } from "./documentTransport";
 
-const putMock = vi.hoisted(() => vi.fn());
-const fetchMock = vi.hoisted(() => vi.fn());
-
-vi.mock("../../../api", async () => {
-  const actual = await vi.importActual<typeof import("../../../api")>("../../../api");
-  return {
-    ...actual,
-    putFileContent: (...args: unknown[]) => putMock(...args),
-    fetchFileContent: (...args: unknown[]) => fetchMock(...args),
-  };
-});
+const saveMock = vi.fn();
+const loadMock = vi.fn();
 
 function initialFile(over: Partial<FileContent> = {}): FileContent {
   return {
@@ -28,11 +20,27 @@ function initialFile(over: Partial<FileContent> = {}): FileContent {
   };
 }
 
+function transport(overrides: Partial<DocumentTransport> = {}): DocumentTransport {
+  return {
+    scopeKey: "project:p1",
+    remountKey: "project:p1:docs/a.md",
+    displayLabel: "demo",
+    displayPath: "docs/a.md",
+    titleName: "a.md",
+    markdownPath: "docs/a.md",
+    load: (...args) => loadMock(...args),
+    save: (...args) => saveMock(...args),
+    assetURL: (path) => `/asset/${path}`,
+    uploadAsset: async () => ({ path: "images/a.png", relativePath: "images/a.png", mime: "image/png", size: 1 }),
+    ...overrides,
+  };
+}
+
 describe("useMarkdownDocument", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    putMock.mockReset();
-    fetchMock.mockReset();
+    saveMock.mockReset();
+    loadMock.mockReset();
   });
 
   afterEach(() => {
@@ -41,7 +49,7 @@ describe("useMarkdownDocument", () => {
 
   it("marks dirty and autosaves after debounce; concurrent edits keep dirty", async () => {
     let resolveSave: (v: unknown) => void = () => undefined;
-    putMock.mockImplementation(
+    saveMock.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveSave = resolve;
@@ -50,9 +58,7 @@ describe("useMarkdownDocument", () => {
 
     const { result } = renderHook(() =>
       useMarkdownDocument({
-        projectID: "p1",
-        source: "worktree",
-        path: "docs/a.md",
+        transport: transport(),
         initial: initialFile(),
         enabled: true,
       }),
@@ -72,7 +78,8 @@ describe("useMarkdownDocument", () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
     expect(result.current.saveStatus).toBe("saving");
-    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(saveMock).toHaveBeenCalledTimes(1);
+    expect(saveMock).toHaveBeenCalledWith("# edited", "rev-1");
 
     // Type while saving
     act(() => {
@@ -90,12 +97,12 @@ describe("useMarkdownDocument", () => {
   });
 
   it("enters conflict on 409 and keeps draft", async () => {
-    putMock.mockRejectedValue(
+    saveMock.mockRejectedValue(
       new APIError("content_conflict", 409, "content_conflict", {
         currentRevision: "rev-disk",
       }),
     );
-    fetchMock.mockResolvedValue({
+    loadMock.mockResolvedValue({
       path: "docs/a.md",
       source: "worktree",
       kind: "text",
@@ -105,9 +112,7 @@ describe("useMarkdownDocument", () => {
 
     const { result } = renderHook(() =>
       useMarkdownDocument({
-        projectID: "p1",
-        source: "worktree",
-        path: "docs/a.md",
+        transport: transport(),
         initial: initialFile(),
         enabled: true,
       }),
@@ -135,9 +140,7 @@ describe("useMarkdownDocument", () => {
     const { result, rerender } = renderHook(
       ({ initial }) =>
         useMarkdownDocument({
-          projectID: "p1",
-          source: "worktree",
-          path: "docs/a.md",
+          transport: transport(),
           initial,
           enabled: true,
         }),

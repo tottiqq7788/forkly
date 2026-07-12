@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"fyne.io/systray"
@@ -12,14 +14,21 @@ import (
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/gitexec"
 	"github.com/forkly-app/forkly/internal/localapi"
+	"github.com/forkly-app/forkly/internal/localfile"
+	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.30"
+var Version = "0.1.31"
 
-func Run(ctx context.Context, log *diagnostics.Logger) error {
+// LaunchPaths holds Markdown paths collected before the app is fully ready.
+type LaunchOptions struct {
+	OpenPaths []string
+}
+
+func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error {
 	dataDir, err := config.DefaultDataDir()
 	if err != nil {
 		return err
@@ -27,18 +36,28 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 	runtimeDir := filepath.Join(dataDir, "runtime")
 	_ = os.MkdirAll(runtimeDir, 0o700)
 
-	si, browser, picker, reveal, err := newPlatform(runtimeDir)
+	si, browser, picker, reveal, openFiles, err := newPlatform(runtimeDir)
 	if err != nil {
 		return err
 	}
+
+	pending := append([]string{}, opts.OpenPaths...)
+	if openFiles != nil {
+		pending = append(pending, openFiles.CollectLaunchOpenFiles()...)
+	}
+	pending = filterMarkdownPaths(pending)
 
 	acquired, err := si.Acquire()
 	if err != nil {
 		return err
 	}
 	if !acquired {
-		_ = si.NotifyExisting("open-console")
-		log.Info("another instance running, forwarded open-console")
+		msg := platform.InstanceMessage{Op: platform.OpOpenConsole}
+		if len(pending) > 0 {
+			msg = platform.InstanceMessage{Op: platform.OpOpenFiles, Paths: pending}
+		}
+		_ = si.NotifyExisting(msg)
+		log.Info("another instance running, forwarded message", "op", msg.Op, "paths", len(msg.Paths))
 		return nil
 	}
 	defer si.Release()
@@ -57,6 +76,7 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 	git := gitexec.NewExecutor(rt)
 	projects := project.NewService(store, git)
 	sessions := session.NewManager(12 * time.Hour)
+	localFiles := localfile.NewService(git)
 
 	wm := watcher.New(func(projectID string) {
 		log.Info("project changed", "id", projectID)
@@ -65,7 +85,8 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
-		Sessions: sessions, Picker: picker, Reveal: reveal, Watcher: wm, Version: Version,
+		Sessions: sessions, LocalFiles: localFiles,
+		Picker: picker, Reveal: reveal, Watcher: wm, Version: Version,
 	})
 	addr, err := api.Start()
 	if err != nil {
@@ -80,14 +101,50 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 			log.Error("open browser", "err", err)
 		}
 	}
-	si.Listen(func(msg string) {
-		if msg == "open-console" {
+
+	openLocalFiles := func(paths []string) {
+		for _, p := range filterMarkdownPaths(paths) {
+			meta, err := localFiles.Open(p)
+			if err != nil {
+				log.Error("open local markdown", "path", p, "err", err)
+				continue
+			}
+			next := "/editor/local/" + url.PathEscape(meta.FileID)
+			openURL := api.OpenConsoleURLWithNext(next)
+			if err := browser.OpenURL(openURL); err != nil {
+				log.Error("open browser for local file", "path", p, "err", err)
+			}
+		}
+	}
+
+	si.Listen(func(msg platform.InstanceMessage) {
+		switch msg.Op {
+		case platform.OpOpenFiles:
+			if len(msg.Paths) == 0 {
+				openConsole()
+				return
+			}
+			openLocalFiles(msg.Paths)
+		default:
 			openConsole()
 		}
 	})
 
+	if openFiles != nil {
+		openFiles.StartOpenFilesWatcher(func(paths []string) {
+			openLocalFiles(paths)
+		})
+	}
+
 	for _, p := range store.Snapshot().Projects {
 		_ = wm.Watch(p.ID, p.Path)
+	}
+
+	if len(pending) > 0 {
+		openLocalFiles(pending)
+	} else {
+		// Keep previous behavior: do not auto-open console on every launch.
+		// Users open via tray menu. Document launches open editors above.
 	}
 
 	go func() {
@@ -95,8 +152,6 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 		systray.Quit()
 	}()
 
-	// systray.Run blocks until Quit; on macOS onExit may not fire, so do not
-	// wait on a second channel after Run returns — let defers clean up and exit.
 	systray.Run(func() {
 		icon := trayIconBytes()
 		systray.SetTemplateIcon(icon, icon)
@@ -144,4 +199,28 @@ func Run(ctx context.Context, log *diagnostics.Logger) error {
 	}, nil)
 
 	return nil
+}
+
+func filterMarkdownPaths(paths []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if !gitexec.IsMarkdownPath(abs) {
+			continue
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+	}
+	return out
 }

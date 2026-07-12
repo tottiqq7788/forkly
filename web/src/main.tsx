@@ -7,6 +7,7 @@ import HomePage from "./pages/HomePage";
 import ProjectPage from "./pages/ProjectPage";
 import SettingsPage from "./pages/SettingsPage";
 import MarkdownEditorPage from "./pages/MarkdownEditorPage";
+import LocalMarkdownEditorPage from "./pages/LocalMarkdownEditorPage";
 import { MarkdownSaveGuardProvider } from "./components/files/markdown/MarkdownSaveGuard";
 import "./index.css";
 
@@ -38,6 +39,10 @@ const router = createBrowserRouter([
       {
         path: "/projects/:id/editor",
         element: <MarkdownEditorPage />,
+      },
+      {
+        path: "/editor/local/:fileId",
+        element: <LocalMarkdownEditorPage />,
       },
     ],
   },

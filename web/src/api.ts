@@ -140,6 +140,24 @@ export type UploadAssetResult = {
   revision?: string;
 };
 
+export type LocalFileMeta = {
+  fileId: string;
+  name: string;
+  displayPath: string;
+  absPath: string;
+  parentName: string;
+  editable: boolean;
+  revision: string;
+  size: number;
+};
+
+export type LocalFileContent = FileContent &
+  LocalFileMeta & {
+    displayPath: string;
+    absPath: string;
+    parentName: string;
+  };
+
 export type ContentConflictDetails = {
   path?: string;
   expectedRevision?: string;
@@ -238,6 +256,85 @@ export function assetURL(
   path: string,
 ): string {
   return `/local-api/v1/projects/${projectID}/asset?source=${source}&path=${encodeURIComponent(path)}`;
+}
+
+function normalizeLocalFileContent(fileId: string, data: Partial<LocalFileContent>): LocalFileContent {
+  const name = data.name || data.path?.split("/").pop() || data.displayPath?.split("/").pop() || fileId;
+  const path = data.path || name;
+  return {
+    ...data,
+    fileId: data.fileId || fileId,
+    name,
+    displayPath: data.displayPath || name,
+    absPath: data.absPath || "",
+    parentName: data.parentName || "",
+    path,
+    source: data.source || "worktree",
+    kind: data.kind || "text",
+    editable: data.editable ?? false,
+    revision: data.revision || "",
+    size: data.size ?? 0,
+  };
+}
+
+export function fetchLocalFileMeta(fileId: string): Promise<LocalFileMeta> {
+  return api<LocalFileMeta>(`/local-api/v1/local-files/${encodeURIComponent(fileId)}`);
+}
+
+export async function fetchLocalFileContent(
+  fileId: string,
+  opts?: { etag?: string },
+): Promise<LocalFileContent | typeof CONTENT_NOT_MODIFIED> {
+  const headers = new Headers();
+  if (opts?.etag) headers.set("If-None-Match", opts.etag);
+  const res = await fetch(`/local-api/v1/local-files/${encodeURIComponent(fileId)}/content`, {
+    headers,
+    credentials: "same-origin",
+  });
+  if (res.status === 304) return CONTENT_NOT_MODIFIED;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const body = data as { error?: string; code?: string; details?: unknown };
+    throw new APIError(body.error || res.statusText, res.status, body.code, body.details);
+  }
+  return normalizeLocalFileContent(fileId, data as Partial<LocalFileContent>);
+}
+
+export function putLocalFileContent(
+  fileId: string,
+  body: { content: string; revision: string },
+): Promise<WriteContentResult> {
+  return api<WriteContentResult>(`/local-api/v1/local-files/${encodeURIComponent(fileId)}/content`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function localAssetURL(fileId: string, path: string): string {
+  return `/local-api/v1/local-files/${encodeURIComponent(fileId)}/asset?path=${encodeURIComponent(path)}`;
+}
+
+export function uploadLocalMarkdownAsset(
+  fileId: string,
+  file: Blob,
+  filename?: string,
+): Promise<UploadAssetResult> {
+  const form = new FormData();
+  form.set("file", file, filename || "image.png");
+  return api<UploadAssetResult>(`/local-api/v1/local-files/${encodeURIComponent(fileId)}/assets`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function openLocalRelativeFile(fileId: string, path: string): Promise<LocalFileMeta> {
+  return api<LocalFileMeta>(
+    `/local-api/v1/local-files/${encodeURIComponent(fileId)}/open-relative`,
+    {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    },
+  );
 }
 
 export type SessionMe = {

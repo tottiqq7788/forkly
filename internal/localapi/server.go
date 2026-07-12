@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/gitexec"
+	"github.com/forkly-app/forkly/internal/localfile"
 	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
@@ -20,16 +22,17 @@ import (
 )
 
 type Deps struct {
-	Log      *diagnostics.Logger
-	Store    *config.Store
-	Git      *gitexec.Executor
-	Projects *project.Service
-	Sessions *session.Manager
-	Picker   platform.FolderPicker
-	Reveal   platform.RevealInFinder
-	Watcher  *watcher.Manager
-	Version  string
-	DevMode  bool
+	Log        *diagnostics.Logger
+	Store      *config.Store
+	Git        *gitexec.Executor
+	Projects   *project.Service
+	Sessions   *session.Manager
+	LocalFiles *localfile.Service
+	Picker     platform.FolderPicker
+	Reveal     platform.RevealInFinder
+	Watcher    *watcher.Manager
+	Version    string
+	DevMode    bool
 }
 
 type StartOptions struct {
@@ -84,6 +87,7 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	mux.HandleFunc("/local-api/v1/projects/", s.auth(s.handleProjectSub))
 	mux.HandleFunc("/local-api/v1/settings", s.auth(s.handleSettings))
 	mux.HandleFunc("/local-api/v1/dialog/folder", s.authWrite(s.handleFolderDialog))
+	mux.HandleFunc("/local-api/v1/local-files/", s.auth(s.handleLocalFiles))
 	mux.Handle("/", s.static())
 
 	handler := s.securityHeaders(s.cop.Handler(mux))
@@ -106,9 +110,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) OpenConsoleURL() string {
+	return s.OpenConsoleURLWithNext("/")
+}
+
+func (s *Server) OpenConsoleURLWithNext(next string) string {
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		next = "/"
+	}
 	token, _ := s.deps.Sessions.CreateOneTimeToken()
-	// Store claimable token
-	return fmt.Sprintf("%s/local-api/v1/session/claim?token=%s&next=/", s.addr, token)
+	return fmt.Sprintf("%s/local-api/v1/session/claim?token=%s&next=%s", s.addr, token, url.QueryEscape(next))
 }
 
 func (s *Server) static() http.Handler {

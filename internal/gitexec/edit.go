@@ -148,7 +148,12 @@ func enrichTextContent(out FileContent, raw []byte) FileContent {
 }
 
 func isMarkdownRel(rel string) bool {
-	ext := strings.ToLower(filepath.Ext(rel))
+	return IsMarkdownPath(rel)
+}
+
+// IsMarkdownPath reports whether path has a supported Markdown extension.
+func IsMarkdownPath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".md", ".markdown", ".mdown", ".mkdn", ".mkd", ".mdwn", ".mdtxt", ".mdtext":
 		return true

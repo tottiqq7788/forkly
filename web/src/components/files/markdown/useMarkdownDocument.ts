@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   APIError,
-  BrowseSource,
   CONTENT_NOT_MODIFIED,
   ContentConflictDetails,
   FileContent,
-  fetchFileContent,
-  putFileContent,
 } from "../../../api";
+import type { DocumentTransport } from "./documentTransport";
 
 export type SaveStatus = "clean" | "dirty" | "saving" | "conflict" | "error";
 
@@ -20,14 +18,12 @@ const AUTOSAVE_MS = 1500;
 const POLL_MS = 3000;
 
 type Args = {
-  projectID: string;
-  source: BrowseSource;
-  path: string;
+  transport: DocumentTransport;
   initial: FileContent;
   enabled: boolean;
 };
 
-export function useMarkdownDocument({ projectID, source, path, initial, enabled }: Args) {
+export function useMarkdownDocument({ transport, initial, enabled }: Args) {
   const [draftMarkdown, setDraftMarkdown] = useState(initial.content ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("clean");
   const [conflictDiskContent, setConflictDiskContent] = useState<string | null>(null);
@@ -92,7 +88,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
     setLastError(null);
 
     try {
-      const result = await putFileContent(projectID, { path, content, revision });
+      const result = await transport.save(content, revision);
       if (cancelledRef.current) return false;
 
       baseRevisionRef.current = result.revision;
@@ -114,7 +110,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
         setLastError("文件已在外部被修改");
         const details = err.details as ContentConflictDetails | undefined;
         try {
-          const disk = await fetchFileContent(projectID, source, path);
+          const disk = await transport.load();
           if (disk !== CONTENT_NOT_MODIFIED) {
             setConflictDiskContent(disk.content ?? "");
             if (disk.revision) {
@@ -180,7 +176,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
     };
     // Intentionally omit initial.revision/content — soft-sync handles same-path refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectID, source, path, setStatus]);
+  }, [transport.remountKey, setStatus]);
 
   // Soft sync: adopt clean disk updates; if local edits exist, enter conflict instead of wiping draft.
   useEffect(() => {
@@ -269,7 +265,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
 
   const discardDraft = useCallback(async () => {
     try {
-      const disk = await fetchFileContent(projectID, source, path);
+      const disk = await transport.load();
       if (disk === CONTENT_NOT_MODIFIED) return;
       const content = disk.content ?? "";
       draftRef.current = content;
@@ -287,7 +283,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
       setLastError(err instanceof Error ? err.message : String(err));
       setStatus("error");
     }
-  }, [path, projectID, setStatus, source]);
+  }, [transport, setStatus]);
 
   const overwriteWithDraft = useCallback(async (): Promise<boolean> => {
     setStatus("dirty");
@@ -304,7 +300,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
       if (statusRef.current !== "clean") return;
       if (!etagRef.current) return;
       try {
-        const result = await fetchFileContent(projectID, source, path, {
+        const result = await transport.load({
           etag: etagRef.current,
         });
         if (cancelledRef.current || statusRef.current !== "clean") return;
@@ -330,7 +326,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
       clearInterval(id);
       window.removeEventListener("focus", onFocus);
     };
-  }, [enabled, path, projectID, source]);
+  }, [enabled, transport]);
 
   return {
     draftMarkdown,

@@ -38,9 +38,35 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Markdown Document</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>net.daringfireball.markdown</string>
+        <string>public.plain-text</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>md</string>
+        <string>markdown</string>
+        <string>mdown</string>
+        <string>mkdn</string>
+        <string>mkd</string>
+        <string>mdwn</string>
+        <string>mdtxt</string>
+        <string>mdtext</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 EOF
+
+plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
 echo "APPL????" > "$APP/Contents/PkgInfo"
 

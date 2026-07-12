@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/forkly-app/forkly/internal/app"
 	"github.com/forkly-app/forkly/internal/diagnostics"
+	"github.com/forkly-app/forkly/internal/gitexec"
 )
 
 func main() {
@@ -48,8 +51,26 @@ func main() {
 		return
 	}
 
-	if err := app.Run(ctx, log); err != nil {
+	if err := app.Run(ctx, log, app.LaunchOptions{OpenPaths: collectArgMarkdownPaths(os.Args[1:])}); err != nil {
 		log.Error("app exited", "err", err)
 		os.Exit(1)
 	}
+}
+
+func collectArgMarkdownPaths(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		a = strings.TrimSpace(a)
+		if a == "" || strings.HasPrefix(a, "-") {
+			continue
+		}
+		abs, err := filepath.Abs(a)
+		if err != nil {
+			continue
+		}
+		if gitexec.IsMarkdownPath(abs) {
+			out = append(out, abs)
+		}
+	}
+	return out
 }

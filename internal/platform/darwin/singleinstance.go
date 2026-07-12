@@ -5,17 +5,20 @@ package darwin
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/forkly-app/forkly/internal/platform"
 )
 
 type SingleInstance struct {
 	sockPath string
 	ln       net.Listener
 	mu       sync.Mutex
-	handler  func(string)
+	handler  func(platform.InstanceMessage)
 }
 
 func NewSingleInstance(runtimeDir string) (*SingleInstance, error) {
@@ -27,7 +30,6 @@ func NewSingleInstance(runtimeDir string) (*SingleInstance, error) {
 
 func (s *SingleInstance) Acquire() (bool, error) {
 	if err := os.Remove(s.sockPath); err != nil && !os.IsNotExist(err) {
-		// try connect to existing
 		conn, err2 := net.Dial("unix", s.sockPath)
 		if err2 == nil {
 			_ = conn.Close()
@@ -37,7 +39,6 @@ func (s *SingleInstance) Acquire() (bool, error) {
 	}
 	ln, err := net.Listen("unix", s.sockPath)
 	if err != nil {
-		// another instance holds it
 		return false, nil
 	}
 	_ = os.Chmod(s.sockPath, 0o600)
@@ -54,15 +55,19 @@ func (s *SingleInstance) acceptLoop() {
 		}
 		go func(c net.Conn) {
 			defer c.Close()
-			var msg string
-			dec := json.NewDecoder(c)
-			if err := dec.Decode(&msg); err == nil {
-				s.mu.Lock()
-				h := s.handler
-				s.mu.Unlock()
-				if h != nil {
-					h(msg)
-				}
+			raw, err := io.ReadAll(io.LimitReader(c, 1<<20))
+			if err != nil || len(raw) == 0 {
+				return
+			}
+			msg, err := platform.DecodeInstanceMessage(raw)
+			if err != nil {
+				return
+			}
+			s.mu.Lock()
+			h := s.handler
+			s.mu.Unlock()
+			if h != nil {
+				h(msg)
 			}
 		}(conn)
 	}
@@ -75,16 +80,17 @@ func (s *SingleInstance) Release() error {
 	return os.Remove(s.sockPath)
 }
 
-func (s *SingleInstance) NotifyExisting(message string) error {
+func (s *SingleInstance) NotifyExisting(message platform.InstanceMessage) error {
 	conn, err := net.Dial("unix", s.sockPath)
 	if err != nil {
 		return fmt.Errorf("notify existing: %w", err)
 	}
 	defer conn.Close()
-	return json.NewEncoder(conn).Encode(message)
+	enc := json.NewEncoder(conn)
+	return enc.Encode(message)
 }
 
-func (s *SingleInstance) Listen(handler func(message string)) {
+func (s *SingleInstance) Listen(handler func(message platform.InstanceMessage)) {
 	s.mu.Lock()
 	s.handler = handler
 	s.mu.Unlock()

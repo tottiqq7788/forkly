@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+
+	"github.com/forkly-app/forkly/internal/platform"
 )
 
 // Stub implementations for compile-time Windows support in 0.1.
@@ -37,7 +39,14 @@ func NewSingleInstance(runtimeDir string) (*SingleInstance, error) {
 
 func (s *SingleInstance) Acquire() (bool, error) { return true, nil }
 func (s *SingleInstance) Release() error         { return nil }
-func (s *SingleInstance) NotifyExisting(message string) error {
+func (s *SingleInstance) NotifyExisting(message platform.InstanceMessage) error {
 	return fmt.Errorf("not implemented")
 }
-func (s *SingleInstance) Listen(handler func(message string)) {}
+func (s *SingleInstance) Listen(handler func(message platform.InstanceMessage)) {}
+
+type OpenFilesReceiver struct{}
+
+func (OpenFilesReceiver) CollectLaunchOpenFiles() []string { return nil }
+func (OpenFilesReceiver) StartOpenFilesWatcher(handler func(paths []string)) {
+	_ = handler
+}
