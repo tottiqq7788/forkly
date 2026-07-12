@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CaretRight,
   File as FileIcon,
@@ -7,7 +7,22 @@ import {
   LinkSimple,
   PencilSimple,
 } from "@phosphor-icons/react";
-import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
+import {
+  api,
+  BrowseSource,
+  createProjectEntry,
+  deleteProjectEntry,
+  FileContent,
+  renameProjectEntry,
+  revealProjectPath,
+  TreeEntry,
+  TreeListing,
+} from "../../api";
+import {
+  ProjectFilesContextMenu,
+  type ProjectFilesContextMenuState,
+} from "./ProjectFilesContextMenu";
+import { ProjectFilesNameDialog } from "./ProjectFilesNameDialog";
 import { FilePreviewView } from "./FilePreviewView";
 import { useMarkdownSaveGuard } from "./markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "./markdown/isMarkdown";
@@ -17,6 +32,7 @@ import { isGitMetaPath, parentDirsOf } from "./markdown/markdownPath";
 type Props = {
   projectID: string;
   projectName: string;
+  projectPath?: string;
   branchKey?: string;
   /** From URL on refresh; empty when entering the tab so we default to the first file. */
   preferredPath?: string;
@@ -25,6 +41,20 @@ type Props = {
 
 type SourceSelection = {
   path: string;
+};
+
+type NameDialogState = {
+  title: string;
+  label: string;
+  initialValue?: string;
+  placeholder?: string;
+  submitLabel: string;
+  onSubmit: (value: string) => Promise<void>;
+};
+
+type NoticeState = {
+  kind: "success" | "error";
+  message: string;
 };
 
 function emptyExpandedBySource(): Record<BrowseSource, Set<string>> {
@@ -37,10 +67,12 @@ function emptyExpandedBySource(): Record<BrowseSource, Set<string>> {
 export function ProjectFilesPanel({
   projectID,
   projectName,
+  projectPath = "",
   branchKey = "",
   preferredPath = "",
   onPathChange,
 }: Props) {
+  const qc = useQueryClient();
   const [source, setSource] = useState<BrowseSource>("worktree");
   const [expandedBySource, setExpandedBySource] = useState(emptyExpandedBySource);
   const [selection, setSelection] = useState<Record<BrowseSource, SourceSelection>>({
@@ -48,6 +80,9 @@ export function ProjectFilesPanel({
     head: { path: "" },
   });
   const [loadedDirs, setLoadedDirs] = useState<Record<string, TreeEntry[]>>({});
+  const [menu, setMenu] = useState<ProjectFilesContextMenuState | null>(null);
+  const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const [pendingFragment, setPendingFragment] = useState("");
   const [mdViewMode, setMdViewMode] = useState<MarkdownViewerMode>("preview");
   const knownBranchKey = useRef("");
@@ -55,10 +90,17 @@ export function ProjectFilesPanel({
   // prop. Ignore the old preferredPath during that short hand-off, otherwise
   // the highlight visibly jumps old → new → old → new.
   const pendingPathChange = useRef("");
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { flush: flushMarkdown } = useMarkdownSaveGuard();
 
   const expanded = expandedBySource[source];
   const activePath = selection[source].path;
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     knownBranchKey.current = "";
@@ -255,13 +297,138 @@ export function ProjectFilesPanel({
     });
   }
 
+  function showNotice(kind: NoticeState["kind"], message: string) {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice({ kind, message });
+    noticeTimer.current = setTimeout(() => setNotice(null), 2200);
+  }
+
+  async function runMenuAction(action: () => Promise<void> | void) {
+    setMenu(null);
+    try {
+      await action();
+    } catch (error) {
+      showNotice("error", error instanceof Error ? error.message : "操作失败");
+    }
+  }
+
+  async function refreshFiles() {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["workspace-tree", projectID] }),
+      qc.invalidateQueries({ queryKey: ["file-preview", projectID] }),
+      qc.invalidateQueries({ queryKey: ["status", projectID] }),
+    ]);
+  }
+
+  async function flushBeforeWrite() {
+    if (source !== "worktree") {
+      showNotice("error", "版本视图不可修改");
+      return false;
+    }
+    return flushMarkdown();
+  }
+
+  function openRootMenu(event: MouseEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("[data-project-file-node='true']")) return;
+    event.preventDefault();
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      target: { kind: "root", path: "" },
+    });
+  }
+
+  function openCreateDialog(parentPath: string, kind: "file" | "dir") {
+    setMenu(null);
+    setNameDialog({
+      title: kind === "file" ? "新建文件" : "新建文件夹",
+      label: kind === "file" ? "文件名称" : "文件夹名称",
+      placeholder: kind === "file" ? "例如：README.md" : "例如：docs",
+      submitLabel: "新建",
+      onSubmit: async (name) => {
+        const ok = await flushBeforeWrite();
+        if (!ok) return;
+        const result = await createProjectEntry(projectID, { kind, parentPath, name });
+        await refreshFiles();
+        if (parentPath) expandDirs([parentPath]);
+        if (kind === "dir") {
+          expandDirs([result.entry.path]);
+          showNotice("success", "已新建文件夹");
+          return;
+        }
+        showNotice("success", "已新建文件");
+        await selectFile(result.entry.path);
+      },
+    });
+  }
+
+  function openRenameDialog(path: string, currentName: string, entryKind: TreeEntry["kind"]) {
+    setMenu(null);
+    setNameDialog({
+      title: "重命名",
+      label: "新名称",
+      initialValue: currentName,
+      submitLabel: "重命名",
+      onSubmit: async (name) => {
+        if (name === currentName) return;
+        const ok = await flushBeforeWrite();
+        if (!ok) return;
+        const result = await renameProjectEntry(projectID, { path, name });
+        await Promise.all([
+          refreshFiles(),
+          qc.invalidateQueries({ queryKey: ["file-preview", projectID, "worktree", path] }),
+        ]);
+        const movedPath = movePathAfterRename(activePath, path, result.entry.path);
+        if (movedPath) {
+          if (onPathChange) pendingPathChange.current = movedPath;
+          setSelection((prev) => ({ ...prev, worktree: { path: movedPath } }));
+          onPathChange?.(movedPath);
+        } else if (isPathAffectedByEntry(activePath, path, entryKind)) {
+          setSelection((prev) => ({ ...prev, worktree: { path: "" } }));
+          onPathChange?.("");
+        }
+        showNotice("success", "已重命名");
+      },
+    });
+  }
+
+  async function deleteEntry(path: string, entryKind: TreeEntry["kind"]) {
+    const label = entryKind === "dir" ? "文件夹" : "文件";
+    const extra = entryKind === "dir" ? "\n\n仅支持删除空文件夹。" : "";
+    if (!window.confirm(`确定删除${label}「${path}」吗？${extra}`)) return;
+    const ok = await flushBeforeWrite();
+    if (!ok) return;
+    await deleteProjectEntry(projectID, path);
+    await refreshFiles();
+    if (isPathAffectedByEntry(activePath, path, entryKind)) {
+      setSelection((prev) => ({ ...prev, worktree: { path: "" } }));
+      onPathChange?.("");
+    }
+    showNotice("success", "已删除");
+  }
+
+  async function copyText(text: string, successMessage: string) {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error("当前浏览器不支持剪贴板写入");
+    }
+    await navigator.clipboard.writeText(text);
+    showNotice("success", successMessage);
+  }
+
+  function absolutePathFor(relPath: string) {
+    if (!projectPath) return relPath;
+    if (!relPath) return projectPath;
+    const sep = projectPath.includes("\\") ? "\\" : "/";
+    return `${projectPath.replace(/[\\/]+$/, "")}${sep}${relPath.split("/").join(sep)}`;
+  }
+
   const activeIsMarkdown =
     !!activePath && isMarkdownPath(activePath) && preview.data?.kind !== "binary";
   const previewDisabled = !!preview.data?.truncated || preview.data?.content == null;
 
   return (
     <div className="flex flex-1 min-h-0">
-      <section className="w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
+      <section className="relative w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
         <div className="p-2 border-b border-[var(--color-border)] flex gap-1">
           <SourceButton active={source === "worktree"} onClick={() => void switchSource("worktree")}>
             目录
@@ -270,7 +437,19 @@ export function ProjectFilesPanel({
             版本
           </SourceButton>
         </div>
-        <div className="overflow-auto flex-1 py-1 px-2">
+        {notice ? (
+          <div
+            role="status"
+            className={`mx-2 mt-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs ${
+              notice.kind === "success"
+                ? "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)]"
+                : "border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
+            }`}
+          >
+            {notice.message}
+          </div>
+        ) : null}
+        <div className="overflow-auto flex-1 py-1 px-2" onContextMenu={openRootMenu}>
           {rootQuery.isLoading && (
             <p className="p-3 text-sm text-[var(--color-text-secondary)]">加载文件树…</p>
           )}
@@ -306,6 +485,7 @@ export function ProjectFilesPanel({
                     onEntriesLoaded={reportEntries}
                     onSelectFile={selectFile}
                     onEditMarkdown={openMarkdownEditor}
+                    onOpenContextMenu={setMenu}
                   />
                 ))
               )}
@@ -329,6 +509,51 @@ export function ProjectFilesPanel({
               源码
             </ModeButton>
           </div>
+        ) : null}
+        {menu ? (
+          <ProjectFilesContextMenu
+            state={menu}
+            source={source}
+            onClose={() => setMenu(null)}
+            onCreateFile={(parentPath) => openCreateDialog(parentPath, "file")}
+            onCreateFolder={(parentPath) => openCreateDialog(parentPath, "dir")}
+            onRefresh={() =>
+              void runMenuAction(async () => {
+                await refreshFiles();
+                showNotice("success", "文件树已刷新");
+              })
+            }
+            onOpenLocation={(path) =>
+              void runMenuAction(async () => {
+                await revealProjectPath(projectID, path);
+              })
+            }
+            onCopyAbsolutePath={(path) =>
+              void runMenuAction(() => copyText(absolutePathFor(path), "已复制绝对路径"))
+            }
+            onCopyRelativePath={(path) =>
+              void runMenuAction(() => copyText(path, "已复制相对路径"))
+            }
+            onRename={openRenameDialog}
+            onDelete={(path, entryKind) => void runMenuAction(() => deleteEntry(path, entryKind))}
+            onToggleDirectory={(path) => void runMenuAction(() => toggleDir(path))}
+            onOpenFile={(path) => void runMenuAction(() => selectFile(path))}
+            onEditMarkdown={(path) => void runMenuAction(() => openMarkdownEditor(path))}
+          />
+        ) : null}
+        {nameDialog ? (
+          <ProjectFilesNameDialog
+            title={nameDialog.title}
+            label={nameDialog.label}
+            initialValue={nameDialog.initialValue}
+            placeholder={nameDialog.placeholder}
+            submitLabel={nameDialog.submitLabel}
+            onClose={() => setNameDialog(null)}
+            onSubmit={(value) => {
+              setNameDialog(null);
+              void runMenuAction(() => nameDialog.onSubmit(value));
+            }}
+          />
         ) : null}
       </section>
 
@@ -455,6 +680,21 @@ function pathKnownInTree(path: string, loaded: Record<string, TreeEntry[]>): "ye
   return "no";
 }
 
+function isPathAffectedByEntry(activePath: string, targetPath: string, entryKind: TreeEntry["kind"]) {
+  if (!activePath) return false;
+  if (activePath === targetPath) return true;
+  return entryKind === "dir" && activePath.startsWith(`${targetPath}/`);
+}
+
+function movePathAfterRename(activePath: string, oldPath: string, nextPath: string) {
+  if (!activePath) return "";
+  if (activePath === oldPath) return nextPath;
+  if (activePath.startsWith(`${oldPath}/`)) {
+    return `${nextPath}${activePath.slice(oldPath.length)}`;
+  }
+  return "";
+}
+
 function TreeNode({
   projectID,
   source,
@@ -467,6 +707,7 @@ function TreeNode({
   onEntriesLoaded,
   onSelectFile,
   onEditMarkdown,
+  onOpenContextMenu,
 }: {
   projectID: string;
   source: BrowseSource;
@@ -479,6 +720,7 @@ function TreeNode({
   onEntriesLoaded: (dirPath: string, entries: TreeEntry[]) => void;
   onSelectFile: (path: string) => void | Promise<void>;
   onEditMarkdown: (path: string) => void;
+  onOpenContextMenu: (menu: ProjectFilesContextMenuState) => void;
 }) {
   const isDir = entry.kind === "dir";
   const isOpen = isDir && expanded.has(entry.path);
@@ -530,10 +772,22 @@ function TreeNode({
   return (
     <div>
       <div
+        data-project-file-node="true"
         className={`group w-full flex items-center gap-1 rounded-[var(--radius-sm)] px-1 py-1 text-xs ${
           active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
         }`}
         style={{ paddingLeft: 4 + depth * 14 }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenContextMenu({
+            x: event.clientX,
+            y: event.clientY,
+            target: isDir
+              ? { kind: "directory", entry, isExpanded: isOpen }
+              : { kind: "file", entry, isMarkdown: entry.kind === "file" && isMarkdownPath(entry.path) },
+          });
+        }}
       >
         <button
           type="button"
@@ -614,6 +868,7 @@ function TreeNode({
               onEntriesLoaded={onEntriesLoaded}
               onSelectFile={onSelectFile}
               onEditMarkdown={onEditMarkdown}
+              onOpenContextMenu={onOpenContextMenu}
             />
           ))}
         </div>

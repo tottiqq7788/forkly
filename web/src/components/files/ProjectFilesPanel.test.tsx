@@ -1,13 +1,22 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectFilesPanel } from "./ProjectFilesPanel";
 
 const apiMock = vi.hoisted(() => vi.fn());
+const createProjectEntryMock = vi.hoisted(() => vi.fn());
+const renameProjectEntryMock = vi.hoisted(() => vi.fn());
+const deleteProjectEntryMock = vi.hoisted(() => vi.fn());
+const revealProjectPathMock = vi.hoisted(() => vi.fn());
+const clipboardWriteMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api", () => ({
   api: (...args: unknown[]) => apiMock(...args),
+  createProjectEntry: (...args: unknown[]) => createProjectEntryMock(...args),
+  renameProjectEntry: (...args: unknown[]) => renameProjectEntryMock(...args),
+  deleteProjectEntry: (...args: unknown[]) => deleteProjectEntryMock(...args),
+  revealProjectPath: (...args: unknown[]) => revealProjectPathMock(...args),
 }));
 
 function contentPath(url: string): string {
@@ -17,6 +26,26 @@ function contentPath(url: string): string {
 describe("ProjectFilesPanel selection", () => {
   beforeEach(() => {
     apiMock.mockReset();
+    createProjectEntryMock.mockReset();
+    renameProjectEntryMock.mockReset();
+    deleteProjectEntryMock.mockReset();
+    revealProjectPathMock.mockReset();
+    clipboardWriteMock.mockReset();
+    createProjectEntryMock.mockResolvedValue({ entry: { name: "new.md", path: "new.md", kind: "file" } });
+    renameProjectEntryMock.mockResolvedValue({ entry: { name: "renamed.txt", path: "renamed.txt", kind: "file" } });
+    deleteProjectEntryMock.mockResolvedValue({ ok: true });
+    revealProjectPathMock.mockResolvedValue({ ok: true });
+    clipboardWriteMock.mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      writable: true,
+      value: { writeText: clipboardWriteMock },
+    });
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      writable: true,
+      value: { writeText: clipboardWriteMock },
+    });
     apiMock.mockImplementation(async (url: string) => {
       if (url.includes("/tree?")) {
         return {
@@ -159,5 +188,111 @@ describe("ProjectFilesPanel selection", () => {
     });
 
     openSpy.mockRestore();
+  });
+
+  it("opens the root context menu and creates a file", async () => {
+    const user = userEvent.setup();
+    const onPathChange = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel
+          projectID="p1"
+          projectName="demo"
+          projectPath="/tmp/demo"
+          onPathChange={onPathChange}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.contextMenu(await screen.findByText("demo/"), { clientX: 32, clientY: 40 });
+    expect(await screen.findByRole("menuitem", { name: "新建文件" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "刷新文件树" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "复制项目绝对路径" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitem", { name: "新建文件" }));
+    await user.clear(screen.getByLabelText("文件名称"));
+    await user.type(screen.getByLabelText("文件名称"), "new.md");
+    await user.click(screen.getByRole("button", { name: "新建" }));
+
+    await waitFor(() => {
+      expect(createProjectEntryMock).toHaveBeenCalledWith("p1", {
+        kind: "file",
+        parentPath: "",
+        name: "new.md",
+      });
+    });
+    await waitFor(() => {
+      expect(onPathChange).toHaveBeenCalledWith("new.md");
+    });
+  });
+
+  it("opens a directory context menu without showing root-only actions", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        return {
+          path: "",
+          source: "worktree",
+          entries: [
+            { name: "docs", path: "docs", kind: "dir" },
+            { name: "a.txt", path: "a.txt", kind: "file" },
+          ],
+          offset: 0,
+          limit: 200,
+          hasMore: false,
+        };
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return { path, source: "worktree", kind: "text", content: path, size: path.length };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" projectPath="/tmp/demo" />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.contextMenu(await screen.findByTitle("docs"), { clientX: 32, clientY: 40 });
+
+    expect(await screen.findByRole("menuitem", { name: "新建文件" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /展开|折叠/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "复制相对路径" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "刷新文件树" })).toBeNull();
+  });
+
+  it("copies a file relative path from the file context menu", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" projectPath="/tmp/demo" />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.contextMenu(await screen.findByTitle("a.txt"), { clientX: 32, clientY: 40 });
+    await user.click(await screen.findByRole("menuitem", { name: "复制相对路径" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("已复制相对路径");
+  });
+
+  it("keeps the head source context menu read-only", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" projectPath="/tmp/demo" />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "版本" }));
+    fireEvent.contextMenu(await screen.findByTitle("a.txt"), { clientX: 32, clientY: 40 });
+
+    expect(await screen.findByRole("menuitem", { name: "打开" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "复制相对路径" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "重命名" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "复制绝对路径" })).toBeNull();
   });
 });

@@ -481,6 +481,7 @@ export default function ProjectPage() {
         <ProjectFilesPanel
           projectID={id}
           projectName={project.data?.name || "项目"}
+          projectPath={project.data?.path || ""}
           branchKey={filesBranchKey || health?.branch || ""}
           preferredPath={tab === "files" ? pathFromUrl : ""}
           onPathChange={(path) => replaceSelectionParam("path", path)}

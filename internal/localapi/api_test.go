@@ -129,6 +129,118 @@ func TestLocalAPIFlow(t *testing.T) {
 	}
 }
 
+func TestProjectEntriesAPI(t *testing.T) {
+	log, err := diagnostics.NewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	dataDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, shutdown, openURL, err := app.RunServerOnly(ctx, log, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(context.Background())
+
+	client, err := app.ClaimClient(openURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := baseFrom(openURL)
+	csrf := readCSRF(client, base)
+	repo := t.TempDir()
+
+	body, _ := json.Marshal(map[string]any{"path": repo, "init": true})
+	req, _ := http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proj map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&proj)
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("add project %d", res.StatusCode)
+	}
+	id, _ := proj["id"].(string)
+
+	body, _ = json.Marshal(map[string]any{"kind": "dir", "parentPath": "", "name": "docs"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/entries", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("create dir %d", res.StatusCode)
+	}
+
+	body, _ = json.Marshal(map[string]any{"kind": "file", "parentPath": "docs", "name": "note.md"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/entries", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createRes struct {
+		Entry map[string]any `json:"entry"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&createRes)
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated || createRes.Entry["path"] != "docs/note.md" {
+		t.Fatalf("create file %d %#v", res.StatusCode, createRes)
+	}
+
+	body, _ = json.Marshal(map[string]any{"path": "docs/note.md", "name": "renamed.md"})
+	req, _ = http.NewRequest(http.MethodPatch, base+"/local-api/v1/projects/"+id+"/entries", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("rename file %d", res.StatusCode)
+	}
+
+	body, _ = json.Marshal(map[string]any{"path": "../outside"})
+	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects/"+id+"/reveal", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("reveal escape should be 400, got %d", res.StatusCode)
+	}
+
+	body, _ = json.Marshal(map[string]any{"path": "docs/renamed.md"})
+	req, _ = http.NewRequest(http.MethodDelete, base+"/local-api/v1/projects/"+id+"/entries", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("delete file %d", res.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "docs", "renamed.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected file deleted, err=%v", err)
+	}
+}
+
 func baseFrom(openURL string) string {
 	// http://127.0.0.1:PORT/local-api/...
 	i := 0
@@ -685,7 +797,7 @@ func TestProjectLifecycleAndIdentity(t *testing.T) {
 	// Relocate requires existing git repo — create by temporarily adding then removing, or use project.Init via API.
 	// Simpler: write files and use second add with init, then remove second from list... messy.
 	// Use relocate onto a fresh inited folder created via filesystem + inspect isn't enough.
-	// Create via POST projects then DELETE leaving the git dir, then relocate first project there? 
+	// Create via POST projects then DELETE leaving the git dir, then relocate first project there?
 	// Actually: init newRepo by adding as project then deleting registration.
 	req, _ = http.NewRequest(http.MethodPost, base+"/local-api/v1/projects", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

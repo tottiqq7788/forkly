@@ -140,6 +140,10 @@ export type UploadAssetResult = {
   revision?: string;
 };
 
+export type ProjectEntryResult = {
+  entry: TreeEntry;
+};
+
 export type LocalFileMeta = {
   fileId: string;
   name: string;
@@ -247,6 +251,40 @@ export function uploadMarkdownAsset(
   return api<UploadAssetResult>(`/local-api/v1/projects/${projectID}/assets`, {
     method: "POST",
     body: form,
+  });
+}
+
+export function createProjectEntry(
+  projectID: string,
+  body: { kind: "file" | "dir"; parentPath: string; name: string },
+): Promise<ProjectEntryResult> {
+  return api<ProjectEntryResult>(`/local-api/v1/projects/${projectID}/entries`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function renameProjectEntry(
+  projectID: string,
+  body: { path: string; name: string },
+): Promise<ProjectEntryResult> {
+  return api<ProjectEntryResult>(`/local-api/v1/projects/${projectID}/entries`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteProjectEntry(projectID: string, path: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(`/local-api/v1/projects/${projectID}/entries`, {
+    method: "DELETE",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export function revealProjectPath(projectID: string, path = ""): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(`/local-api/v1/projects/${projectID}/reveal`, {
+    method: "POST",
+    body: JSON.stringify({ path }),
   });
 }
 

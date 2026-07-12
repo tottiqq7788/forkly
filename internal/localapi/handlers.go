@@ -67,10 +67,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	snap := s.deps.Store.Snapshot()
 	rt := s.deps.Git.Runtime()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session":     sess,
-		"identity":    snap.Identity,
+		"session":            sess,
+		"identity":           snap.Identity,
 		"identityConfigured": config.IdentityConfigured(snap.Identity),
-		"preferences": snap.Preferences,
+		"preferences":        snap.Preferences,
 		"git": map[string]any{
 			"version": rt.Version,
 			"bundled": rt.Bundled,
@@ -341,6 +341,8 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 		gitexec.WriteAssetHTTP(w, mime, data, revision)
 	case "assets":
 		s.authWrite(s.handlePostAssets(id, p))(w, r)
+	case "entries":
+		s.authWrite(s.handleProjectEntries(id, p))(w, r)
 	case "commit":
 		s.authWrite(s.handleCommit(id, p))(w, r)
 	case "history":
@@ -401,11 +403,23 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 				return
 			}
+			var body struct {
+				Path string `json:"path"`
+			}
+			if err := decodeJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			target, err := s.deps.Git.ResolveWorktreePath(p.Path, body.Path)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			if s.deps.Reveal == nil {
 				writeErr(w, http.StatusNotImplemented, "不支持")
 				return
 			}
-			if err := s.deps.Reveal.Reveal(p.Path); err != nil {
+			if err := s.deps.Reveal.Reveal(target); err != nil {
 				writeErr(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -424,6 +438,74 @@ func (s *Server) rewatchProject(id, path string) {
 	}
 	s.deps.Watcher.Unwatch(id)
 	_ = s.deps.Watcher.Watch(id, path)
+}
+
+func (s *Server) handleProjectEntries(id string, p config.ProjectEntry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			var body struct {
+				Kind       string `json:"kind"`
+				ParentPath string `json:"parentPath"`
+				Name       string `json:"name"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			var (
+				entry gitexec.TreeEntry
+				err   error
+			)
+			switch body.Kind {
+			case "file":
+				entry, err = s.deps.Git.CreateFile(p.Path, body.ParentPath, body.Name)
+			case "dir":
+				entry, err = s.deps.Git.CreateFolder(p.Path, body.ParentPath, body.Name)
+			default:
+				writeErr(w, http.StatusBadRequest, "kind 无效")
+				return
+			}
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusCreated, map[string]any{"entry": entry})
+		case http.MethodPatch:
+			var body struct {
+				Path string `json:"path"`
+				Name string `json:"name"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			entry, err := s.deps.Git.RenameEntry(p.Path, body.Path, body.Name)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusOK, map[string]any{"entry": entry})
+		case http.MethodDelete:
+			var body struct {
+				Path string `json:"path"`
+			}
+			if err := decodeJSON(r, &body); err != nil {
+				writeErr(w, http.StatusBadRequest, "请求无效")
+				return
+			}
+			if err := s.deps.Git.DeleteEntry(p.Path, body.Path); err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.deps.Projects.TouchOpened(id)
+			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		default:
+			writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}
 }
 
 func (s *Server) handleBranches(w http.ResponseWriter, r *http.Request, id string, p config.ProjectEntry, parts []string) {
