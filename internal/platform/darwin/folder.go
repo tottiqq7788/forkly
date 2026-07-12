@@ -55,6 +55,8 @@ import "C"
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"unsafe"
 )
 
@@ -82,6 +84,15 @@ func (FolderPicker) PickFolder(ctx context.Context, title string) (string, error
 type Browser struct{}
 
 func (Browser) OpenURL(url string) error {
+	// Always record the last open URL for local diagnostics (claim tokens are one-time).
+	if home, err := os.UserHomeDir(); err == nil {
+		dir := filepath.Join(home, "Library", "Logs", "Forkly")
+		_ = os.MkdirAll(dir, 0o700)
+		_ = os.WriteFile(filepath.Join(dir, "last-open-url.txt"), []byte(url), 0o600)
+	}
+	if os.Getenv("FORKLY_SKIP_BROWSER") == "1" {
+		return nil
+	}
 	c := C.CString(url)
 	defer C.free(unsafe.Pointer(c))
 	C.openURL(c)

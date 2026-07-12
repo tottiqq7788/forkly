@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, fetchFileContent, fetchSessionMe, type FileContent, type Project } from "../api";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
 import { createProjectDocumentTransport } from "../components/files/markdown/documentTransport";
 import { FullPageMessage, MarkdownEditorWorkspace } from "./MarkdownEditorWorkspace";
+import { EditorErrorBoundary } from "./EditorErrorBoundary";
 
 export default function MarkdownEditorPage() {
   const { id = "" } = useParams();
@@ -27,6 +29,17 @@ export default function MarkdownEditorPage() {
     queryFn: () => fetchFileContent(id, "worktree", path),
     enabled: me.isSuccess && !!id && !!path,
   });
+
+  const file = fileQuery.data as FileContent | undefined;
+  const projectName = (project.data as Project | undefined)?.name || id;
+  const transport = useMemo(() => {
+    if (!id || !file?.path) return null;
+    return createProjectDocumentTransport({
+      projectID: id,
+      projectName,
+      path: file.path,
+    });
+  }, [id, projectName, file?.path]);
 
   if (me.isError) {
     return (
@@ -58,8 +71,7 @@ export default function MarkdownEditorPage() {
     );
   }
 
-  const file = fileQuery.data as FileContent | undefined;
-  if (!file) {
+  if (!file || !transport) {
     return <FullPageMessage title="文件不存在" body={path} />;
   }
 
@@ -73,17 +85,13 @@ export default function MarkdownEditorPage() {
     );
   }
 
-  const transport = createProjectDocumentTransport({
-    projectID: id,
-    projectName: (project.data as Project | undefined)?.name || id,
-    path: file.path,
-  });
-
   return (
-    <MarkdownEditorWorkspace
-      key={transport.remountKey}
-      transport={transport}
-      file={file}
-    />
+    <EditorErrorBoundary
+      resetKey={transport.remountKey}
+      title="项目编辑器出错"
+      fallbackBody="页面发生错误。可尝试重新加载，或从项目文件树再次打开该 Markdown。"
+    >
+      <MarkdownEditorWorkspace key={transport.remountKey} transport={transport} file={file} />
+    </EditorErrorBoundary>
   );
 }

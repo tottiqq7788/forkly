@@ -67,6 +67,22 @@ EOF
 
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
+# Semantic assertions: keep Markdown association capable even if XML stays valid.
+assert_plist() {
+  local key="$1"
+  local want="$2"
+  local got
+  got="$(/usr/libexec/PlistBuddy -c "Print ${key}" "$APP/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ "$got" != "$want" ]]; then
+    echo "Info.plist assertion failed for ${key}: got '${got}' want '${want}'" >&2
+    exit 1
+  fi
+}
+assert_plist ":CFBundleDocumentTypes:0:CFBundleTypeRole" "Editor"
+assert_plist ":CFBundleDocumentTypes:0:LSHandlerRank" "Alternate"
+assert_plist ":CFBundleDocumentTypes:0:LSItemContentTypes:0" "net.daringfireball.markdown"
+assert_plist ":CFBundleDocumentTypes:0:CFBundleTypeExtensions:0" "md"
+
 echo "APPL????" > "$APP/Contents/PkgInfo"
 
 ICON_SRC="$ROOT/packaging/macos/AppIcon.icns"

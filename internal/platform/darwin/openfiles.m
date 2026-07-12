@@ -1,46 +1,26 @@
 //go:build darwin
 
 #import <Cocoa/Cocoa.h>
+#import <objc/runtime.h>
 #import <stdlib.h>
+#import <string.h>
 
 extern void forklyOpenFilesBridge(char **paths, int count);
 
-@interface ForklyOpenFilesHandler : NSObject
-@end
+static BOOL forklyOpenFilesHookInstalled = NO;
 
-@implementation ForklyOpenFilesHandler
-- (void)handleOpenDocuments:(NSAppleEventDescriptor *)event
-              withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
-  NSAppleEventDescriptor *list = [event paramDescriptorForKeyword:keyDirectObject];
-  if (list == nil) {
+static void forklyDeliverOpenPaths(NSArray<NSString *> *filenames) {
+  if (filenames == nil || filenames.count == 0) {
     return;
   }
-  NSInteger n = [list numberOfItems];
-  if (n <= 0) {
-    return;
-  }
-  char **paths = (char **)calloc((size_t)n, sizeof(char *));
+  NSUInteger n = filenames.count;
+  char **paths = (char **)calloc(n, sizeof(char *));
   if (paths == NULL) {
     return;
   }
   int count = 0;
-  for (NSInteger i = 1; i <= n; i++) {
-    NSAppleEventDescriptor *item = [list descriptorAtIndex:i];
-    if (item == nil) {
-      continue;
-    }
-    NSString *urlString = [item stringValue];
-    if (urlString == nil) {
-      continue;
-    }
-    NSURL *url = [NSURL URLWithString:urlString];
-    if (url == nil || ![url isFileURL]) {
-      url = [NSURL fileURLWithPath:urlString];
-    }
-    if (url == nil) {
-      continue;
-    }
-    NSString *path = url.path;
+  for (NSUInteger i = 0; i < n; i++) {
+    NSString *path = filenames[i];
     if (path == nil || path.length == 0) {
       continue;
     }
@@ -57,86 +37,79 @@ extern void forklyOpenFilesBridge(char **paths, int count);
   }
   free(paths);
 }
-@end
 
-static ForklyOpenFilesHandler *forklyOpenFilesHandler = nil;
-
-static void ensureOpenFilesHandler(void) {
-  if (forklyOpenFilesHandler != nil) {
-    return;
+static BOOL forklyApplicationOpenFile(id self, SEL _cmd, NSApplication *app, NSString *filename) {
+#pragma unused(self, _cmd, app)
+  if (filename != nil && filename.length > 0) {
+    forklyDeliverOpenPaths(@[filename]);
   }
-  forklyOpenFilesHandler = [[ForklyOpenFilesHandler alloc] init];
-  [[NSAppleEventManager sharedAppleEventManager]
-      setEventHandler:forklyOpenFilesHandler
-          andSelector:@selector(handleOpenDocuments:withReplyEvent:)
-        forEventClass:kCoreEventClass
-           andEventID:kAEOpenDocuments];
+  [NSApp replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
+  return YES;
 }
 
-char **forklyCollectLaunchOpenFiles(int *outCount) {
-  *outCount = 0;
-  ensureOpenFilesHandler();
-  NSAppleEventDescriptor *ev = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
-  if (ev == nil) {
-    return NULL;
-  }
-  if ([ev eventClass] != kCoreEventClass || [ev eventID] != kAEOpenDocuments) {
-    return NULL;
-  }
-  NSAppleEventDescriptor *list = [ev paramDescriptorForKeyword:keyDirectObject];
-  if (list == nil) {
-    return NULL;
-  }
-  NSInteger n = [list numberOfItems];
-  if (n <= 0) {
-    return NULL;
-  }
-  char **paths = (char **)calloc((size_t)n, sizeof(char *));
-  if (paths == NULL) {
-    return NULL;
-  }
-  int count = 0;
-  for (NSInteger i = 1; i <= n; i++) {
-    NSAppleEventDescriptor *item = [list descriptorAtIndex:i];
-    if (item == nil) {
-      continue;
-    }
-    NSString *urlString = [item stringValue];
-    if (urlString == nil) {
-      continue;
-    }
-    NSURL *url = [NSURL URLWithString:urlString];
-    if (url == nil || ![url isFileURL]) {
-      url = [NSURL fileURLWithPath:urlString];
-    }
-    if (url == nil) {
-      continue;
-    }
-    NSString *path = url.path;
-    if (path == nil || path.length == 0) {
-      continue;
-    }
-    paths[count] = strdup(path.fileSystemRepresentation);
-    if (paths[count] != NULL) {
-      count++;
-    }
-  }
-  if (count == 0) {
-    free(paths);
-    return NULL;
-  }
-  *outCount = count;
-  return paths;
+static void forklyApplicationOpenFiles(id self, SEL _cmd, NSApplication *app, NSArray<NSString *> *filenames) {
+#pragma unused(self, _cmd, app)
+  forklyDeliverOpenPaths(filenames);
+  [NSApp replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
 }
 
-void forklyFreeStringArray(char **paths, int count) {
-  if (paths == NULL) {
+static const char *forklyAddMethod(Class cls, SEL sel, IMP imp, const char *types, const char *name) {
+  Method existing = class_getInstanceMethod(cls, sel);
+  if (existing != NULL) {
+    return NULL;
+  }
+  if (!class_addMethod(cls, sel, imp, types)) {
+    return name;
+  }
+  return NULL;
+}
+
+const char *forklyInstallOpenFilesDelegateHook(void) {
+  if (forklyOpenFilesHookInstalled) {
+    return NULL;
+  }
+  Class cls = objc_getClass("SystrayAppDelegate");
+  if (cls == Nil) {
+    return "SystrayAppDelegate class not found; fyne.io/systray may have changed";
+  }
+
+  const char *err = forklyAddMethod(cls, @selector(application:openFile:), (IMP)forklyApplicationOpenFile, "c@:@@",
+                                    "failed to add application:openFile: to SystrayAppDelegate");
+  if (err != NULL) {
+    return err;
+  }
+  err = forklyAddMethod(cls, @selector(application:openFiles:), (IMP)forklyApplicationOpenFiles, "v@:@@",
+                        "failed to add application:openFiles: to SystrayAppDelegate");
+  if (err != NULL) {
+    return err;
+  }
+
+  forklyOpenFilesHookInstalled = YES;
+  return NULL;
+}
+
+BOOL forklySystrayRespondsToOpenFiles(void) {
+  Class cls = objc_getClass("SystrayAppDelegate");
+  if (cls == Nil) {
+    return NO;
+  }
+  return class_getInstanceMethod(cls, @selector(application:openFiles:)) != NULL &&
+         class_getInstanceMethod(cls, @selector(application:openFile:)) != NULL;
+}
+
+void forklyInvokeOpenFilesForTest(char **paths, int count) {
+  if (paths == NULL || count <= 0) {
     return;
   }
+  NSMutableArray<NSString *> *filenames = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
   for (int i = 0; i < count; i++) {
-    free(paths[i]);
+    if (paths[i] == NULL) {
+      continue;
+    }
+    NSString *path = [NSString stringWithUTF8String:paths[i]];
+    if (path != nil) {
+      [filenames addObject:path];
+    }
   }
-  free(paths);
+  forklyDeliverOpenPaths(filenames);
 }
-
-void forklyStartOpenFilesWatcher(void) { ensureOpenFilesHandler(); }

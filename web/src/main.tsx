@@ -8,6 +8,7 @@ import ProjectPage from "./pages/ProjectPage";
 import SettingsPage from "./pages/SettingsPage";
 import MarkdownEditorPage from "./pages/MarkdownEditorPage";
 import LocalMarkdownEditorPage from "./pages/LocalMarkdownEditorPage";
+import RouteErrorPage from "./pages/RouteErrorPage";
 import { MarkdownSaveGuardProvider } from "./components/files/markdown/MarkdownSaveGuard";
 import "./index.css";
 
@@ -22,10 +23,12 @@ const router = createBrowserRouter([
         <Outlet />
       </MarkdownSaveGuardProvider>
     ),
+    errorElement: <RouteErrorPage />,
     children: [
       {
         path: "/",
         element: <App />,
+        errorElement: <RouteErrorPage />,
         children: [
           { index: true, element: <HomePage /> },
           { path: "add", element: <HomePage /> },
@@ -39,10 +42,12 @@ const router = createBrowserRouter([
       {
         path: "/projects/:id/editor",
         element: <MarkdownEditorPage />,
+        errorElement: <RouteErrorPage />,
       },
       {
         path: "/editor/local/:fileId",
         element: <LocalMarkdownEditorPage />,
+        errorElement: <RouteErrorPage />,
       },
     ],
   },

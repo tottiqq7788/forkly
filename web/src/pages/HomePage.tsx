@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api, DashboardActivity, Project } from "../api";
 import { ActivityBarChart, HorizontalBars, SegmentBar } from "../components/DashboardCharts";
 
@@ -57,6 +58,17 @@ function Panel({
 }
 
 export default function HomePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [claimExpired, setClaimExpired] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("claim") !== "expired") return;
+    setClaimExpired(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("claim");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const projectsQ = useQuery({
     queryKey: ["projects"],
     queryFn: () => api<{ projects: Project[] }>("/local-api/v1/projects"),
@@ -145,6 +157,12 @@ export default function HomePage() {
           基于本机已纳入 Forkly 的仓库汇总统计
         </p>
       </div>
+
+      {claimExpired && (
+        <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--color-warning-fg)]/30 bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-warning-fg)]">
+          打开链接已失效。请从菜单栏 Forkly 图标重新打开控制台或文件。
+        </div>
+      )}
 
       {projectsQ.isError && (
         <p className="mb-4 text-sm text-[var(--color-error-fg)]">

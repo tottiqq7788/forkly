@@ -103,7 +103,7 @@ func (m *Manager) SetCookies(w http.ResponseWriter, s *Session) {
 		Value:    s.ID,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Expires:  s.ExpiresAt,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -111,7 +111,7 @@ func (m *Manager) SetCookies(w http.ResponseWriter, s *Session) {
 		Value:    s.CSRF,
 		Path:     "/",
 		HttpOnly: false,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Expires:  s.ExpiresAt,
 	})
 }

@@ -19,6 +19,7 @@ type SingleInstance struct {
 	ln       net.Listener
 	mu       sync.Mutex
 	handler  func(platform.InstanceMessage)
+	pending  []platform.InstanceMessage
 }
 
 func NewSingleInstance(runtimeDir string) (*SingleInstance, error) {
@@ -29,17 +30,22 @@ func NewSingleInstance(runtimeDir string) (*SingleInstance, error) {
 }
 
 func (s *SingleInstance) Acquire() (bool, error) {
-	if err := os.Remove(s.sockPath); err != nil && !os.IsNotExist(err) {
-		conn, err2 := net.Dial("unix", s.sockPath)
-		if err2 == nil {
+	// Probe first: never delete a live socket belonging to another instance.
+	if conn, err := net.Dial("unix", s.sockPath); err == nil {
+		_ = conn.Close()
+		return false, nil
+	}
+
+	// Socket is missing or stale; remove remnant then listen.
+	_ = os.Remove(s.sockPath)
+	ln, err := net.Listen("unix", s.sockPath)
+	if err != nil {
+		// Another process won the race.
+		if conn, dialErr := net.Dial("unix", s.sockPath); dialErr == nil {
 			_ = conn.Close()
 			return false, nil
 		}
-		_ = os.Remove(s.sockPath)
-	}
-	ln, err := net.Listen("unix", s.sockPath)
-	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("listen single-instance socket: %w", err)
 	}
 	_ = os.Chmod(s.sockPath, 0o600)
 	s.ln = ln
@@ -65,10 +71,13 @@ func (s *SingleInstance) acceptLoop() {
 			}
 			s.mu.Lock()
 			h := s.handler
-			s.mu.Unlock()
-			if h != nil {
-				h(msg)
+			if h == nil {
+				s.pending = append(s.pending, msg)
+				s.mu.Unlock()
+				return
 			}
+			s.mu.Unlock()
+			h(msg)
 		}(conn)
 	}
 }
@@ -93,5 +102,12 @@ func (s *SingleInstance) NotifyExisting(message platform.InstanceMessage) error 
 func (s *SingleInstance) Listen(handler func(message platform.InstanceMessage)) {
 	s.mu.Lock()
 	s.handler = handler
+	pending := s.pending
+	s.pending = nil
 	s.mu.Unlock()
+	for _, msg := range pending {
+		if handler != nil {
+			handler(msg)
+		}
+	}
 }

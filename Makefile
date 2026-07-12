@@ -27,6 +27,7 @@ test:
 
 e2e: build
 	node web/e2e/smoke.mjs
+	node web/e2e/editor-smoke.mjs
 
 fetch-git:
 	bash scripts/fetch-git-runtime.sh $(ARCH)

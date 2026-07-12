@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchLocalFileContent, fetchSessionMe, type LocalFileContent } from "../api";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
 import { createLocalDocumentTransport } from "../components/files/markdown/documentTransport";
 import { FullPageMessage, MarkdownEditorWorkspace } from "./MarkdownEditorWorkspace";
+import { EditorErrorBoundary } from "./EditorErrorBoundary";
 
 export default function LocalMarkdownEditorPage() {
   const { fileId = "" } = useParams();
@@ -19,6 +21,14 @@ export default function LocalMarkdownEditorPage() {
     queryFn: () => fetchLocalFileContent(fileId),
     enabled: me.isSuccess && !!fileId,
   });
+
+  const file = fileQuery.data as LocalFileContent | undefined;
+  const transport = useMemo(
+    () => (fileId && file ? createLocalDocumentTransport({ fileId, file }) : null),
+    // Remount identity is fileId + path; content/revision refreshes should not rebuild transport.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fileId, file?.path, file?.name, file?.displayPath, file?.absPath, file?.parentName],
+  );
 
   if (me.isError) {
     return (
@@ -46,8 +56,7 @@ export default function LocalMarkdownEditorPage() {
     );
   }
 
-  const file = fileQuery.data as LocalFileContent | undefined;
-  if (!file) {
+  if (!file || !transport) {
     return <FullPageMessage title="文件不存在" body={fileId} />;
   }
 
@@ -64,13 +73,13 @@ export default function LocalMarkdownEditorPage() {
     );
   }
 
-  const transport = createLocalDocumentTransport({ fileId, file });
-
   return (
-    <MarkdownEditorWorkspace
-      key={transport.remountKey}
-      transport={transport}
-      file={file}
-    />
+    <EditorErrorBoundary
+      resetKey={transport.remountKey}
+      title="本地编辑器出错"
+      fallbackBody="页面发生错误。可尝试重新加载；若仍失败请从 Finder 再次打开该 Markdown 文件。"
+    >
+      <MarkdownEditorWorkspace key={transport.remountKey} transport={transport} file={file} />
+    </EditorErrorBoundary>
   );
 }

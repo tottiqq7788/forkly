@@ -46,7 +46,7 @@ func (s *SingleInstance) Listen(handler func(message platform.InstanceMessage)) 
 
 type OpenFilesReceiver struct{}
 
-func (OpenFilesReceiver) CollectLaunchOpenFiles() []string { return nil }
-func (OpenFilesReceiver) StartOpenFilesWatcher(handler func(paths []string)) {
+func (OpenFilesReceiver) StartOpenFilesWatcher(handler func(paths []string)) error {
 	_ = handler
+	return nil
 }

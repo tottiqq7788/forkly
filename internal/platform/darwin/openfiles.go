@@ -7,15 +7,19 @@ package darwin
 #cgo LDFLAGS: -framework Cocoa -framework AppKit
 
 #include <stdlib.h>
+#include <stdbool.h>
 
-char** forklyCollectLaunchOpenFiles(int* outCount);
-void forklyFreeStringArray(char** paths, int count);
-void forklyStartOpenFilesWatcher(void);
+const char* forklyInstallOpenFilesDelegateHook(void);
+bool forklySystrayRespondsToOpenFiles(void);
+void forklyInvokeOpenFilesForTest(char **paths, int count);
 */
 import "C"
 import (
+	"fmt"
 	"sync"
 	"unsafe"
+
+	_ "fyne.io/systray" // ensure SystrayAppDelegate is linked for the runtime hook
 )
 
 type OpenFilesReceiver struct{}
@@ -53,34 +57,51 @@ func forklyOpenFilesBridge(paths **C.char, count C.int) {
 	h(out)
 }
 
-func (OpenFilesReceiver) CollectLaunchOpenFiles() []string {
-	var n C.int
-	cPaths := C.forklyCollectLaunchOpenFiles(&n)
-	if cPaths == nil || n <= 0 {
-		return nil
+// InstallOpenFilesDelegateHook adds application:openFile(s): onto SystrayAppDelegate
+// so AppKit routes Finder Open Documents events through our Go bridge.
+func InstallOpenFilesDelegateHook() error {
+	msg := C.forklyInstallOpenFilesDelegateHook()
+	if msg != nil {
+		return fmt.Errorf("%s", C.GoString(msg))
 	}
-	defer C.forklyFreeStringArray(cPaths, n)
-	out := make([]string, 0, int(n))
-	slice := unsafe.Slice(cPaths, int(n))
-	for i := 0; i < int(n); i++ {
-		if slice[i] == nil {
-			continue
-		}
-		out = append(out, C.GoString(slice[i]))
-	}
-	return out
+	return nil
 }
 
-func (OpenFilesReceiver) StartOpenFilesWatcher(handler func(paths []string)) {
+func systrayRespondsToOpenFiles() bool {
+	return bool(C.forklySystrayRespondsToOpenFiles())
+}
+
+func invokeOpenFilesForTest(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	cPaths := make([]*C.char, len(paths))
+	for i, p := range paths {
+		cPaths[i] = C.CString(p)
+	}
+	defer func() {
+		for _, p := range cPaths {
+			C.free(unsafe.Pointer(p))
+		}
+	}()
+	C.forklyInvokeOpenFilesForTest(&cPaths[0], C.int(len(cPaths)))
+}
+
+func (OpenFilesReceiver) StartOpenFilesWatcher(handler func(paths []string)) error {
 	openFilesMu.Lock()
 	openFilesHandler = handler
 	pending := openFilesPending
 	openFilesPending = nil
 	openFilesMu.Unlock()
-	C.forklyStartOpenFilesWatcher()
+
+	if err := InstallOpenFilesDelegateHook(); err != nil {
+		return err
+	}
+
 	for _, paths := range pending {
 		if handler != nil && len(paths) > 0 {
 			handler(paths)
 		}
 	}
+	return nil
 }

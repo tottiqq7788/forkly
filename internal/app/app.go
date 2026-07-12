@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/systray"
@@ -21,7 +22,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.32"
+var Version = "0.1.33"
 
 // LaunchPaths holds Markdown paths collected before the app is fully ready.
 type LaunchOptions struct {
@@ -41,11 +42,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		return err
 	}
 
-	pending := append([]string{}, opts.OpenPaths...)
-	if openFiles != nil {
-		pending = append(pending, openFiles.CollectLaunchOpenFiles()...)
-	}
-	pending = filterMarkdownPaths(pending)
+	pending := filterMarkdownPaths(append([]string{}, opts.OpenPaths...))
 
 	acquired, err := si.Acquire()
 	if err != nil {
@@ -56,8 +53,11 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		if len(pending) > 0 {
 			msg = platform.InstanceMessage{Op: platform.OpOpenFiles, Paths: pending}
 		}
-		_ = si.NotifyExisting(msg)
-		log.Info("another instance running, forwarded message", "op", msg.Op, "paths", len(msg.Paths))
+		if err := si.NotifyExisting(msg); err != nil {
+			log.Error("notify existing instance", "err", err, "op", msg.Op, "count", len(msg.Paths))
+		} else {
+			log.Info("another instance running, forwarded message", "op", msg.Op, "count", len(msg.Paths))
+		}
 		return nil
 	}
 	defer si.Release()
@@ -103,7 +103,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	}
 
 	openLocalFiles := func(paths []string) {
-		for _, p := range filterMarkdownPaths(paths) {
+		for _, p := range dedupeRecentMarkdownPaths(filterMarkdownPaths(paths)) {
 			meta, err := localFiles.Open(p)
 			if err != nil {
 				log.Error("open local markdown", "path", p, "err", err)
@@ -120,6 +120,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	si.Listen(func(msg platform.InstanceMessage) {
 		switch msg.Op {
 		case platform.OpOpenFiles:
+			log.Info("open documents event", "source", "ipc", "count", len(msg.Paths))
 			if len(msg.Paths) == 0 {
 				openConsole()
 				return
@@ -130,10 +131,15 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		}
 	})
 
+	// Register AppKit open-files hook before entering the systray event loop so
+	// cold-start and hot-open Finder events are acknowledged successfully.
 	if openFiles != nil {
-		openFiles.StartOpenFilesWatcher(func(paths []string) {
+		if err := openFiles.StartOpenFilesWatcher(func(paths []string) {
+			log.Info("open documents event", "source", "appkit", "count", len(paths))
 			openLocalFiles(paths)
-		})
+		}); err != nil {
+			log.Error("install open files delegate hook", "err", err)
+		}
 	}
 
 	for _, p := range store.Snapshot().Projects {
@@ -141,6 +147,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	}
 
 	if len(pending) > 0 {
+		log.Info("open documents event", "source", "argv", "count", len(pending))
 		openLocalFiles(pending)
 	} else {
 		// Keep previous behavior: do not auto-open console on every launch.
@@ -221,6 +228,34 @@ func filterMarkdownPaths(paths []string) []string {
 		}
 		seen[abs] = struct{}{}
 		out = append(out, abs)
+	}
+	return out
+}
+
+// Cold launch often delivers the same Markdown path via both argv and AppKit
+// open-files within ~100ms. Opening twice races claim URLs in the browser.
+var (
+	recentOpenMu   sync.Mutex
+	recentOpenPath = map[string]time.Time{}
+)
+
+func dedupeRecentMarkdownPaths(paths []string) []string {
+	const window = 2 * time.Second
+	now := time.Now()
+	recentOpenMu.Lock()
+	defer recentOpenMu.Unlock()
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if t, ok := recentOpenPath[p]; ok && now.Sub(t) < window {
+			continue
+		}
+		recentOpenPath[p] = now
+		out = append(out, p)
+	}
+	for p, t := range recentOpenPath {
+		if now.Sub(t) >= window {
+			delete(recentOpenPath, p)
+		}
 	}
 	return out
 }

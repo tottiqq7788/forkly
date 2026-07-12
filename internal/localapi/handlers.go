@@ -33,7 +33,8 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, ok := s.deps.Sessions.ClaimOneTime(token)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "打开链接已失效，请从菜单栏重新打开控制台")
+		// Prefer a human-readable SPA page over a bare JSON 401 in the browser.
+		http.Redirect(w, r, "/?claim=expired", http.StatusFound)
 		return
 	}
 	s.deps.Sessions.SetCookies(w, sess)

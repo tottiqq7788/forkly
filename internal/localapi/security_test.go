@@ -211,6 +211,9 @@ func TestSecurityHeadersAllowHttpsImages(t *testing.T) {
 	if !strings.Contains(csp, "img-src 'self' data: blob: https:") {
 		t.Fatalf("expected https in img-src, got %q", csp)
 	}
+	if !strings.Contains(csp, "font-src 'self' data:") {
+		t.Fatalf("expected font-src to allow data: fonts, got %q", csp)
+	}
 	if !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-eval") {
 		t.Fatalf("script-src must stay self without unsafe-eval: %q", csp)
 	}

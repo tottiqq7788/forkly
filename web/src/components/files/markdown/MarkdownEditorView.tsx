@@ -253,6 +253,7 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
     mountRef.current = mount;
 
     let cancelled = false;
+    let readyForEdits = false;
     let muya: MuyaInstance | null = null;
     let changeHandler: ((...args: unknown[]) => void) | null = null;
     let copyLinkHandler: ((...args: unknown[]) => void) | null = null;
@@ -400,6 +401,12 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
         stripPlantUMLFromQuickInsert(muya);
 
         changeHandler = () => {
+          // Ignore synthetic json-change during init/setContent so opening a file
+          // does not immediately mark the document dirty / arm beforeunload.
+          if (!readyForEdits) {
+            onTocChangeRef.current?.(muya?.getTOC() ?? []);
+            return;
+          }
           onChangeRef.current?.();
           onTocChangeRef.current?.(muya?.getTOC() ?? []);
         };
@@ -418,6 +425,7 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
 
         muyaRef.current = muya;
         onTocChangeRef.current?.(muya.getTOC());
+        readyForEdits = true;
         onReady?.();
       } catch (err) {
         if (!cancelled) {

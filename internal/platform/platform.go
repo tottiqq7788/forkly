@@ -25,10 +25,9 @@ type SingleInstance interface {
 	Listen(handler func(message InstanceMessage))
 }
 
-// OpenFilesReceiver collects document paths opened via the OS (file association).
+// OpenFilesReceiver receives document paths opened via the OS (file association).
 type OpenFilesReceiver interface {
-	// CollectLaunchOpenFiles returns paths from the launch Open Documents event, if any.
-	CollectLaunchOpenFiles() []string
-	// StartOpenFilesWatcher registers for subsequent Open Documents events.
-	StartOpenFilesWatcher(handler func(paths []string))
+	// StartOpenFilesWatcher registers the Go callback and installs the native
+	// open-files delegate hook. It must be called before the platform UI event loop.
+	StartOpenFilesWatcher(handler func(paths []string)) error
 }

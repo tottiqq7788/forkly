@@ -1,11 +1,8 @@
 import {
-  Component,
   useCallback,
   useEffect,
   useRef,
   useState,
-  type ErrorInfo,
-  type ReactNode,
 } from "react";
 import { X } from "@phosphor-icons/react";
 import type { FileContent } from "../api";
@@ -32,6 +29,7 @@ import {
   snapshotFromScrollElement,
   writeEditorScrollSnapshot,
 } from "./editorScrollRestore";
+import { EditorErrorBoundary } from "./EditorErrorBoundary";
 import "../components/files/markdown/markdown-editor.css";
 
 const TOC_NAV_LOCK_MS = 2000;
@@ -124,6 +122,27 @@ export function MarkdownEditorWorkspace({
     index: -1,
   });
 
+  // Muya may briefly expand document scroll metrics (off-screen portals). Keep the
+  // viewport pinned so Firefox does not leave the editor painted at scrollX≈9999.
+  useEffect(() => {
+    const reset = () => {
+      if (window.scrollX !== 0 || window.scrollY !== 0) {
+        window.scrollTo(0, 0);
+      }
+      if (document.documentElement.scrollLeft !== 0) {
+        document.documentElement.scrollLeft = 0;
+      }
+    };
+    reset();
+    const timers = [0, 50, 250, 1000].map((ms) => window.setTimeout(reset, ms));
+    const id = window.setInterval(reset, 500);
+    const stop = window.setTimeout(() => window.clearInterval(id), 4000);
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      window.clearInterval(id);
+      window.clearTimeout(stop);
+    };
+  }, []);
   const {
     draftMarkdown,
     saveStatus,
@@ -789,6 +808,7 @@ export function MarkdownEditorWorkspace({
           <div ref={scrollRootRef} className="forkly-md-editor-scroll">
             <EditorErrorBoundary
               resetKey={editorKey}
+              silent
               onFallback={(err) => {
                 setEditorError(err);
               }}
@@ -828,38 +848,11 @@ export function MarkdownEditorWorkspace({
 
 export function FullPageMessage({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex h-full items-center justify-center p-8">
+    <div className="flex min-h-dvh h-full items-center justify-center p-8 bg-[var(--color-canvas)] text-[var(--color-text)]">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold mb-2">{title}</h1>
         <p className="text-[var(--color-text-secondary)]">{body}</p>
       </div>
     </div>
   );
-}
-
-class EditorErrorBoundary extends Component<
-  { children: ReactNode; resetKey: number; onFallback: (err: Error) => void },
-  { error: Error | null }
-> {
-  state: { error: Error | null } = { error: null };
-
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("Markdown editor failed", error, info);
-    this.props.onFallback(error);
-  }
-
-  componentDidUpdate(prevProps: { resetKey: number }) {
-    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
-      this.setState({ error: null });
-    }
-  }
-
-  render() {
-    if (this.state.error) return null;
-    return this.props.children;
-  }
 }
