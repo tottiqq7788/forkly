@@ -5,6 +5,7 @@ import {
   Code,
   Function as FunctionIcon,
   Image as ImageIcon,
+  Keyboard,
   Link as LinkIcon,
   ListBullets,
   ListNumbers,
@@ -21,6 +22,8 @@ import {
   Plus,
   ArrowsClockwise,
 } from "@phosphor-icons/react";
+import { Drawer } from "../../../Drawer";
+import { MarkdownShortcutsPanel } from "./MarkdownShortcutsPanel";
 
 export type FormatCommand =
   | "undo"
@@ -277,6 +280,7 @@ export function MarkdownCategoryToolbar({
   findOpen = false,
 }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const categories = buildCategories();
@@ -315,84 +319,111 @@ export function MarkdownCategoryToolbar({
   }, []);
 
   return (
-    <div ref={rootRef} className="forkly-md-category-rail" role="toolbar" aria-label="Markdown 格式">
-      {categories.map((category) => {
-        const isDirect = !!category.directCommand;
-        const open = !isDirect && openId === category.id;
-        const active = isDirect ? findOpen : open;
-        const rows = chunkItems(category.items);
-        const cols = Math.min(Math.max(category.items.length, 1), FLYOUT_MAX_ITEMS_PER_ROW);
-        return (
-          <div
-            key={category.id}
-            className="forkly-md-category-wrap"
-            onMouseEnter={() => {
-              if (!isDirect) openCategory(category.id);
-            }}
-            onMouseLeave={() => {
-              if (!isDirect) scheduleClose();
-            }}
-          >
-            <button
-              type="button"
-              className={`forkly-md-category-btn ${active ? "is-open" : ""}`}
-              title={category.title}
-              aria-label={category.title}
-              aria-expanded={isDirect ? undefined : open}
-              aria-haspopup={isDirect ? undefined : "true"}
-              aria-pressed={isDirect ? findOpen : undefined}
-              onFocus={() => {
+    <>
+      <div ref={rootRef} className="forkly-md-category-rail" role="toolbar" aria-label="Markdown 格式">
+        {categories.map((category) => {
+          const isDirect = !!category.directCommand;
+          const open = !isDirect && openId === category.id;
+          const active = isDirect ? findOpen : open;
+          const rows = chunkItems(category.items);
+          const cols = Math.min(Math.max(category.items.length, 1), FLYOUT_MAX_ITEMS_PER_ROW);
+          return (
+            <div
+              key={category.id}
+              className="forkly-md-category-wrap"
+              onMouseEnter={() => {
                 if (!isDirect) openCategory(category.id);
               }}
-              onClick={() => {
-                if (category.directCommand) {
-                  onCommand(category.directCommand);
-                  setOpenId(null);
-                  return;
-                }
-                setOpenId(open ? null : category.id);
+              onMouseLeave={() => {
+                if (!isDirect) scheduleClose();
               }}
             >
-              <span className="forkly-md-tool-icon">{category.icon}</span>
-              <span className="forkly-md-tool-label">{category.label}</span>
-            </button>
-            {open ? (
-              <div
-                className="forkly-md-category-flyout"
-                style={{ "--forkly-md-flyout-cols": cols } as CSSProperties}
-                role="menu"
+              <button
+                type="button"
+                className={`forkly-md-category-btn ${active ? "is-open" : ""}`}
+                title={category.title}
                 aria-label={category.title}
-                onMouseEnter={() => openCategory(category.id)}
-                onMouseLeave={scheduleClose}
+                aria-expanded={isDirect ? undefined : open}
+                aria-haspopup={isDirect ? undefined : "true"}
+                aria-pressed={isDirect ? findOpen : undefined}
+                onFocus={() => {
+                  if (!isDirect) openCategory(category.id);
+                }}
+                onClick={() => {
+                  if (category.directCommand) {
+                    onCommand(category.directCommand);
+                    setOpenId(null);
+                    return;
+                  }
+                  setOpenId(open ? null : category.id);
+                }}
               >
-                {rows.map((row, index) => (
-                  <div key={`${category.id}-${index}`} className="forkly-md-category-flyout-row">
-                    {row.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        role="menuitem"
-                        className="forkly-md-category-btn"
-                        title={item.title}
-                        aria-label={item.title}
-                        disabled={item.disabled}
-                        onClick={() => {
-                          onCommand(item.command);
-                          setOpenId(null);
-                        }}
-                      >
-                        <span className="forkly-md-tool-icon">{item.icon}</span>
-                        <span className="forkly-md-tool-label">{item.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
+                <span className="forkly-md-tool-icon">{category.icon}</span>
+                <span className="forkly-md-tool-label">{category.label}</span>
+              </button>
+              {open ? (
+                <div
+                  className="forkly-md-category-flyout"
+                  style={{ "--forkly-md-flyout-cols": cols } as CSSProperties}
+                  role="menu"
+                  aria-label={category.title}
+                  onMouseEnter={() => openCategory(category.id)}
+                  onMouseLeave={scheduleClose}
+                >
+                  {rows.map((row, index) => (
+                    <div key={`${category.id}-${index}`} className="forkly-md-category-flyout-row">
+                      {row.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          role="menuitem"
+                          className="forkly-md-category-btn"
+                          title={item.title}
+                          aria-label={item.title}
+                          disabled={item.disabled}
+                          onClick={() => {
+                            onCommand(item.command);
+                            setOpenId(null);
+                          }}
+                        >
+                          <span className="forkly-md-tool-icon">{item.icon}</span>
+                          <span className="forkly-md-tool-label">{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <div className="forkly-md-category-footer">
+          <button
+            type="button"
+            className={`forkly-md-category-btn ${shortcutsOpen ? "is-open" : ""}`}
+            title="键盘快捷键"
+            aria-label="键盘快捷键"
+            aria-pressed={shortcutsOpen}
+            onClick={() => {
+              setOpenId(null);
+              setShortcutsOpen(true);
+            }}
+          >
+            <span className="forkly-md-tool-icon">
+              <Keyboard size={18} />
+            </span>
+            <span className="forkly-md-tool-label">键盘</span>
+          </button>
+        </div>
+      </div>
+
+      {shortcutsOpen ? (
+        <Drawer title="键盘快捷键" width={520} onClose={() => setShortcutsOpen(false)}>
+          <MarkdownShortcutsPanel />
+        </Drawer>
+      ) : null}
+    </>
   );
 }
 

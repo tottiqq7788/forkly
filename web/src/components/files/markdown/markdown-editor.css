@@ -437,6 +437,12 @@
   z-index: 20;
 }
 
+.forkly-md-category-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
 .forkly-md-category-wrap {
   position: relative;
 }
@@ -544,6 +550,15 @@
     padding: 6px 8px;
   }
 
+  .forkly-md-category-footer {
+    margin-top: 0;
+    margin-left: auto;
+    padding-top: 0;
+    padding-left: 8px;
+    border-top: 0;
+    border-left: 1px solid var(--color-border);
+  }
+
   .forkly-md-category-flyout {
     right: auto;
     left: 0;
@@ -551,6 +566,71 @@
     bottom: calc(100% + 8px);
     transform: none;
   }
+}
+
+.forkly-md-shortcuts-lead {
+  margin: 0 0 20px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.forkly-md-shortcuts-group + .forkly-md-shortcuts-group {
+  margin-top: 24px;
+}
+
+.forkly-md-shortcuts-group-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.forkly-md-shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.forkly-md-shortcuts-table th,
+.forkly-md-shortcuts-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.forkly-md-shortcuts-table th {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  background: var(--color-canvas-subtle);
+}
+
+.forkly-md-shortcuts-table th:nth-child(1),
+.forkly-md-shortcuts-table td:nth-child(1) {
+  width: 42%;
+}
+
+.forkly-md-shortcuts-table th:nth-child(2),
+.forkly-md-shortcuts-table td:nth-child(2) {
+  width: 28%;
+  white-space: nowrap;
+}
+
+.forkly-md-shortcuts-keys {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.forkly-md-shortcuts-note {
+  color: var(--color-text-tertiary);
 }
 
 @media (prefers-reduced-motion: reduce) {

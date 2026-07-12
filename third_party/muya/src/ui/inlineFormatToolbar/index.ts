@@ -28,14 +28,15 @@ const FORMAT_SHORTCUTS = {
     i: 'em',
     u: 'u',
     d: 'del',
-    e: 'inline_code',
+    '`': 'inline_code',
+    k: 'link',
     l: 'link',
 } as const;
 
 /** Format keyboard shortcuts with shift modifier */
 const FORMAT_SHORTCUTS_SHIFT = {
     h: 'mark',
-    e: 'inline_math',
+    m: 'inline_math',
     i: 'image',
     r: 'clear',
 } as const;
@@ -158,7 +159,7 @@ export class InlineFormatToolbar extends BaseFloat {
         }
 
         // Handle format shortcuts
-        this._handleFormatShortcut(event, key, shiftKey, anchorBlock);
+        this._handleFormatShortcut(event, key.toLowerCase(), shiftKey, anchorBlock);
     }
 
     /**

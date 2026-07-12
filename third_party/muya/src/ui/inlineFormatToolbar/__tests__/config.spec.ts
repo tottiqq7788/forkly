@@ -63,4 +63,9 @@ describe('inlineFormatToolbar config — shortcut labels match default keybindin
         expect(entry.shortcut).toMatch(/\+M$/);
         expect(entry.shortcut).not.toMatch(/\+E$/i);
     });
+
+    it('link advertises the common editor shortcut Cmd/Ctrl+K', () => {
+        const entry = icons.find(i => i.type === 'link')!;
+        expect(entry.shortcut).toMatch(/\+K$/);
+    });
 });

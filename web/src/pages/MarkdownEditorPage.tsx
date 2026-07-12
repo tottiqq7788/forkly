@@ -24,9 +24,20 @@ import { useMarkdownDocument } from "../components/files/markdown/useMarkdownDoc
 import { useRegisterMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
 import { resolveActiveTocSlug, shouldApplyScrollDerivedTocActive } from "./tocScrollSync";
+import {
+  applyEditorScrollSnapshot,
+  blurFocusedEditorIn,
+  readEditorScrollSnapshot,
+  resolveRestoredScrollTop,
+  shouldPersistScrollSnapshot,
+  snapshotFromScrollElement,
+  writeEditorScrollSnapshot,
+} from "./editorScrollRestore";
 import "../components/files/markdown/markdown-editor.css";
 
 const TOC_NAV_LOCK_MS = 2000;
+const SCROLL_RESTORE_WATCH_MS = 4000;
+const EDITOR_ROOT_SELECTOR = ".forkly-markdown-editor";
 
 const STATUS_LABEL: Record<string, string> = {
   clean: "已保存",
@@ -35,6 +46,49 @@ const STATUS_LABEL: Record<string, string> = {
   conflict: "冲突",
   error: "保存失败",
 };
+
+function isFormField(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
+}
+
+function isEditorKeyTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest(EDITOR_ROOT_SELECTOR);
+}
+
+function paragraphShortcutFromEvent(e: KeyboardEvent): string | null {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return null;
+
+  if (!e.shiftKey && (e.code === "Digit0" || e.key === "0")) return "paragraph";
+  for (let level = 1; level <= 6; level += 1) {
+    if (!e.shiftKey && (e.code === `Digit${level}` || e.key === String(level))) {
+      return `heading ${level}`;
+    }
+  }
+
+  if (e.shiftKey && (e.code === "Digit7" || e.key === "7")) return "ol-order";
+  if (e.shiftKey && (e.code === "Digit8" || e.key === "8")) return "ul-bullet";
+  if (e.shiftKey && (e.code === "Digit9" || e.key === "9")) return "ul-task";
+
+  if (e.altKey && !e.shiftKey) {
+    const key = e.key.toLowerCase();
+    if (key === "q") return "blockquote";
+    if (key === "o") return "ol-order";
+    if (key === "u") return "ul-bullet";
+    if (key === "x") return "ul-task";
+    if (key === "m") return "mathblock";
+    if (key === "c") return "pre";
+    if (e.code === "Minus" || e.key === "-") return "hr";
+  }
+
+  if (e.shiftKey && !e.altKey && e.key.toLowerCase() === "t") return "table";
+
+  return null;
+}
 
 export default function MarkdownEditorPage() {
   const { id = "" } = useParams();
@@ -128,13 +182,19 @@ function MarkdownEditorWorkspace({
   /** While set, ignore scroll-derived TOC highlights so smooth navigation does not flash intermediates. */
   const tocNavLockRef = useRef<{ slug: string; timer: number | null } | null>(null);
   const syncActiveFromScrollRef = useRef<() => void>(() => undefined);
+  const suppressScrollSaveRef = useRef(false);
+  const tocRef = useRef<TocItem[]>([]);
+  const [editorReadyTick, setEditorReadyTick] = useState(0);
   const [toc, setToc] = useState<TocItem[]>([]);
+  tocRef.current = toc;
   const [activeSlug, setActiveSlug] = useState("");
   const [editorError, setEditorError] = useState<Error | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const [findOpen, setFindOpen] = useState(false);
   const [findMounted, setFindMounted] = useState(false);
+  const [findFocusTarget, setFindFocusTarget] = useState<"find" | "replace">("find");
   const findInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const [findQuery, setFindQuery] = useState("");
   const [replaceQuery, setReplaceQuery] = useState("");
   const [findCase, setFindCase] = useState(false);
@@ -184,6 +244,143 @@ function MarkdownEditorWorkspace({
     document.title = `${file.path.split("/").pop() || file.path} · Forkly`;
   }, [file.path]);
 
+  useEffect(() => {
+    const root = scrollRootRef.current;
+    if (!root) return;
+
+    const persist = () => {
+      if (suppressScrollSaveRef.current) return;
+      const next = snapshotFromScrollElement(root, activeSlug || undefined);
+      const previous = readEditorScrollSnapshot(sessionStorage, projectID, file.path);
+      if (!shouldPersistScrollSnapshot(next, previous)) return;
+      writeEditorScrollSnapshot(sessionStorage, projectID, file.path, next);
+    };
+
+    let raf = 0;
+    const onScroll = () => {
+      if (suppressScrollSaveRef.current) return;
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        persist();
+      });
+    };
+
+    root.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("pagehide", persist);
+    window.addEventListener("beforeunload", persist);
+    document.addEventListener("visibilitychange", persist);
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      root.removeEventListener("scroll", onScroll);
+      window.removeEventListener("pagehide", persist);
+      window.removeEventListener("beforeunload", persist);
+      document.removeEventListener("visibilitychange", persist);
+      persist();
+    };
+  }, [projectID, file.path, activeSlug]);
+
+  useEffect(() => {
+    if (editorReadyTick === 0) return;
+    const root = scrollRootRef.current;
+    if (!root) return;
+
+    const saved = readEditorScrollSnapshot(sessionStorage, projectID, file.path);
+    if (!saved || (saved.top <= 0 && !saved.slug)) return;
+
+    let cancelled = false;
+    let raf = 0;
+    let settledFrames = 0;
+    let lastHeight = 0;
+    suppressScrollSaveRef.current = true;
+
+    const apply = () => {
+      if (cancelled || !scrollRootRef.current) return 0;
+      const el = scrollRootRef.current;
+      blurFocusedEditorIn(el);
+      if (saved.top > 0) return applyEditorScrollSnapshot(el, saved, { blurFocused: true });
+      return el.scrollTop;
+    };
+
+    apply();
+    raf = window.requestAnimationFrame(() => {
+      apply();
+      syncActiveFromScrollRef.current();
+    });
+
+    const started = performance.now();
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            apply();
+          })
+        : null;
+    ro?.observe(root);
+    // Diagrams / images live under the editor mount and keep growing after onReady.
+    const mount = root.querySelector(".forkly-markdown-editor");
+    if (mount instanceof HTMLElement) ro?.observe(mount);
+
+    const finish = () => {
+      if (cancelled) return;
+      // If absolute scroll never stuck (caret/layout fight), jump via heading offset.
+      if (saved.slug && root.scrollTop < Math.max(40, saved.top * 0.25)) {
+        const headings = Array.from(
+          root.querySelectorAll<HTMLElement>(
+            ".forkly-muya-mount h1, .forkly-muya-mount h2, .forkly-muya-mount h3, .forkly-muya-mount h4, .forkly-muya-mount h5, .forkly-muya-mount h6",
+          ),
+        );
+        const tocIndex = tocRef.current.findIndex((item) => item.slug === saved.slug);
+        const target = tocIndex >= 0 ? headings[tocIndex] : null;
+        if (target) {
+          blurFocusedEditorIn(root);
+          const top = target.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - 24;
+          root.scrollTop = Math.max(0, top);
+        } else if (saved.top > 0) {
+          applyEditorScrollSnapshot(root, saved, { blurFocused: true });
+        }
+      }
+      blurFocusedEditorIn(root);
+      syncActiveFromScrollRef.current();
+      suppressScrollSaveRef.current = false;
+      const settled = snapshotFromScrollElement(root, saved.slug);
+      const previous = readEditorScrollSnapshot(sessionStorage, projectID, file.path);
+      if (shouldPersistScrollSnapshot(settled, previous ?? saved)) {
+        writeEditorScrollSnapshot(sessionStorage, projectID, file.path, {
+          ...settled,
+          // Keep the original reading progress if we somehow landed near top.
+          top: settled.top < 40 && saved.top >= 40 ? saved.top : settled.top,
+          scrollHeight: Math.max(settled.scrollHeight, saved.scrollHeight),
+          slug: settled.slug || saved.slug,
+        });
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      const top = apply();
+      const height = root.scrollHeight;
+      if (height === lastHeight && Math.abs(top - resolveRestoredScrollTop(root, saved)) <= 2) {
+        settledFrames += 1;
+      } else {
+        settledFrames = 0;
+        lastHeight = height;
+      }
+      const timedOut = performance.now() - started >= SCROLL_RESTORE_WATCH_MS;
+      const stable = settledFrames >= 3 && height > root.clientHeight;
+      if (!timedOut && !stable) return;
+      window.clearInterval(timer);
+      ro?.disconnect();
+      finish();
+    }, 80);
+
+    return () => {
+      cancelled = true;
+      if (raf) window.cancelAnimationFrame(raf);
+      window.clearInterval(timer);
+      ro?.disconnect();
+      suppressScrollSaveRef.current = false;
+    };
+  }, [editorReadyTick, projectID, file.path]);
+
   const runSearch = useCallback(
     (query: string, opts?: SearchOpts) => {
       if (!editorRef.current) return;
@@ -219,7 +416,8 @@ function MarkdownEditorWorkspace({
     setFindInfo({ count: matches.length, index: result.index, error: undefined });
   }
 
-  function openFind() {
+  function openFind(focusTarget: "find" | "replace" = "find") {
+    setFindFocusTarget(focusTarget);
     setFindMounted(true);
     setFindOpen(true);
   }
@@ -237,30 +435,47 @@ function MarkdownEditorWorkspace({
   useEffect(() => {
     if (!findOpen || !findMounted) return;
     const id = window.requestAnimationFrame(() => {
-      findInputRef.current?.focus();
-      findInputRef.current?.select();
+      const input = findFocusTarget === "replace" ? replaceInputRef.current : findInputRef.current;
+      input?.focus();
+      input?.select();
     });
     return () => window.cancelAnimationFrame(id);
-  }, [findOpen, findMounted]);
+  }, [findFocusTarget, findOpen, findMounted]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+      if (e.defaultPrevented) return;
       if (mod && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void flush();
         return;
       }
-      if (mod && e.key.toLowerCase() === "f") {
+      if (mod && !e.altKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         openFind();
+        return;
+      }
+      if (
+        (mod && e.altKey && e.key.toLowerCase() === "f") ||
+        (!e.metaKey && e.ctrlKey && e.key.toLowerCase() === "h")
+      ) {
+        e.preventDefault();
+        openFind("replace");
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        openFind();
+        const r = editorRef.current?.find(e.shiftKey ? "previous" : "next");
+        if (r) applySearchResult(r);
         return;
       }
       // Muya does not bind undo/redo itself (MarkText wires these in Electron).
       // contenteditable native undo is useless after Muya rewrites the DOM.
       if (mod && e.key.toLowerCase() === "z") {
         const t = e.target;
-        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+        if (isFormField(t)) return;
         e.preventDefault();
         if (e.shiftKey) editorRef.current?.redo();
         else editorRef.current?.undo();
@@ -268,10 +483,25 @@ function MarkdownEditorWorkspace({
       }
       if (mod && !e.shiftKey && e.key.toLowerCase() === "y") {
         const t = e.target;
-        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+        if (isFormField(t)) return;
         e.preventDefault();
         editorRef.current?.redo();
         return;
+      }
+      if (isEditorKeyTarget(e.target)) {
+        if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+          e.preventDefault();
+          editorRef.current?.format("link");
+          return;
+        }
+
+        const paragraphType = paragraphShortcutFromEvent(e);
+        if (paragraphType) {
+          e.preventDefault();
+          editorRef.current?.updateParagraph(paragraphType);
+          editorRef.current?.focus();
+          return;
+        }
       }
       if (e.key === "Escape" && findOpen) {
         closeFind();
@@ -511,6 +741,7 @@ function MarkdownEditorWorkspace({
                 }}
               />
               <input
+                ref={replaceInputRef}
                 type="text"
                 placeholder="替换"
                 value={replaceQuery}
@@ -628,6 +859,11 @@ function MarkdownEditorWorkspace({
                 markdownPath={file.path}
                 onChange={() => setDraftFromEditor()}
                 onTocChange={setToc}
+                onReady={() => {
+                  const root = scrollRootRef.current;
+                  if (root) blurFocusedEditorIn(root);
+                  setEditorReadyTick((n) => n + 1);
+                }}
                 onOpenPath={(targetPath) => {
                   if (!isMarkdownPath(targetPath)) {
                     window.open(

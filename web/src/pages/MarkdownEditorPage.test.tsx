@@ -9,6 +9,9 @@ const fetchFileContent = vi.fn();
 const apiMock = vi.fn();
 const editorUndo = vi.fn();
 const editorRedo = vi.fn();
+const editorFormat = vi.fn();
+const editorUpdateParagraph = vi.fn();
+const editorFind = vi.fn();
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -35,12 +38,12 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
     React.useImperativeHandle(ref, () => ({
       flush: () => undefined,
       getMarkdown: () => "# Hello",
-      format: () => undefined,
-      updateParagraph: () => undefined,
+      format: (...args: unknown[]) => editorFormat(...args),
+      updateParagraph: (...args: unknown[]) => editorUpdateParagraph(...args),
       undo: (...args: unknown[]) => editorUndo(...args),
       redo: (...args: unknown[]) => editorRedo(...args),
       search: () => ({ matches: [], index: -1 }),
-      find: () => ({ matches: [], index: -1 }),
+      find: (...args: unknown[]) => editorFind(...args),
       replace: () => ({ matches: [], index: -1 }),
       hideAllFloatTools: () => undefined,
       focus: () => undefined,
@@ -52,7 +55,11 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
       onTocChange?.([{ content: "Hello", lvl: 1, slug: "s1", githubSlug: "hello" }]);
       onReady?.();
     }, [onTocChange, onReady]);
-    return React.createElement("div", { "data-testid": "fake-editor" }, "editor");
+    return React.createElement(
+      "div",
+      { "data-testid": "fake-editor", className: "forkly-markdown-editor" },
+      "editor",
+    );
   });
   return { MarkdownEditorView: Fake };
 });
@@ -83,11 +90,16 @@ function renderAt(path: string) {
 
 describe("MarkdownEditorPage", () => {
   beforeEach(() => {
+    sessionStorage.clear();
     fetchSessionMe.mockReset();
     fetchFileContent.mockReset();
     apiMock.mockReset();
     editorUndo.mockReset();
     editorRedo.mockReset();
+    editorFormat.mockReset();
+    editorUpdateParagraph.mockReset();
+    editorFind.mockReset();
+    editorFind.mockReturnValue({ matches: [], index: -1 });
     fetchSessionMe.mockResolvedValue({ user: "dev" });
     apiMock.mockResolvedValue({ id: "p1", name: "demo" });
   });
@@ -155,5 +167,65 @@ describe("MarkdownEditorPage", () => {
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, bubbles: true }));
     expect(editorRedo).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes common editor shortcuts to paragraph, link, and find commands", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    const editor = await screen.findByTestId("fake-editor");
+
+    editor.dispatchEvent(new KeyboardEvent("keydown", { key: "1", code: "Digit1", metaKey: true, bubbles: true }));
+    expect(editorUpdateParagraph).toHaveBeenCalledWith("heading 1");
+
+    editor.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "7", code: "Digit7", metaKey: true, shiftKey: true, bubbles: true }),
+    );
+    expect(editorUpdateParagraph).toHaveBeenCalledWith("ol-order");
+
+    editor.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+    expect(editorFormat).toHaveBeenCalledWith("link");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true, bubbles: true }));
+    expect(editorFind).toHaveBeenCalledWith("next");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true, shiftKey: true, bubbles: true }));
+    expect(editorFind).toHaveBeenCalledWith("previous");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, altKey: true, bubbles: true }));
+    await waitFor(() => expect(screen.getByPlaceholderText("替换")).toHaveFocus());
+  });
+
+  it("restores the editor scroll position after refresh for the same file", async () => {
+    sessionStorage.setItem(
+      "forkly:md-editor-scroll:p1:docs/a.md",
+      JSON.stringify({ top: 480, scrollHeight: 2000 }),
+    );
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello\n\n".repeat(80),
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
+
+    const scrollRoot = document.querySelector(".forkly-md-editor-scroll") as HTMLElement;
+    expect(scrollRoot).toBeTruthy();
+    Object.defineProperty(scrollRoot, "clientHeight", { configurable: true, value: 700 });
+    Object.defineProperty(scrollRoot, "scrollHeight", { configurable: true, value: 2000 });
+
+    await waitFor(() => {
+      expect(scrollRoot.scrollTop).toBe(480);
+    });
   });
 });

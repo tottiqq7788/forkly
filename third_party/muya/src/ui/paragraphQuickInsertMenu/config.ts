@@ -344,12 +344,13 @@ export function getLabelFromEvent(event: Event) {
     );
 
     const result = ALL_MENU_CONFIG.find((menu) => {
-        const { code, metaKey, shiftKey, altKey } = event;
+        const { code, metaKey, ctrlKey, shiftKey, altKey } = event;
         const { shortKeyMap = {} as IQuickInsertMenuItem['children'][number]['shortKeyMap'] } = menu;
+        const commandKey = isOsx ? metaKey : ctrlKey;
 
         return (
             code === shortKeyMap?.code
-            && metaKey === shortKeyMap.metaKey
+            && commandKey === shortKeyMap.metaKey
             && shiftKey === shortKeyMap.shiftKey
             && altKey === shortKeyMap.altKey
         );

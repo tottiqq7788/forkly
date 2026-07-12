@@ -31,4 +31,17 @@ describe("MarkdownCategoryToolbar", () => {
     expect(onCommand).toHaveBeenCalledWith("find:open");
     expect(screen.queryByRole("menu")).toBeNull();
   });
+
+  it("opens a shortcuts drawer from the bottom keyboard item", async () => {
+    const onCommand = vi.fn();
+    const user = userEvent.setup();
+    render(<MarkdownCategoryToolbar onCommand={onCommand} />);
+
+    await user.click(screen.getByRole("button", { name: "键盘快捷键" }));
+    expect(await screen.findByRole("dialog", { name: "键盘快捷键" })).toBeInTheDocument();
+    expect(screen.getByText("保存当前文件")).toBeInTheDocument();
+    expect(screen.getByText("加粗")).toBeInTheDocument();
+    expect(screen.getByText("打开快速插入菜单")).toBeInTheDocument();
+    expect(onCommand).not.toHaveBeenCalled();
+  });
 });
