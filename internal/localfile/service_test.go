@@ -202,3 +202,31 @@ func TestAssetAndOpenRelativeBounds(t *testing.T) {
 		t.Fatal("expected relative escape rejection")
 	}
 }
+
+func TestOpenRelativeRejectsSymlinkEscape(t *testing.T) {
+	s := newService(t)
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+	outside := writeMD(t, outsideDir, "secret.md", "# secret\n")
+	path := writeMD(t, dir, "doc.md", "# doc\n")
+	link := filepath.Join(dir, "bait.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	meta, err := s.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenRelative(meta.FileID, "bait.md"); err == nil {
+		t.Fatal("expected symlink relative open rejection")
+	}
+
+	// Parent dir symlink: path looks inside root but resolves outside.
+	evilParent := filepath.Join(dir, "escape")
+	if err := os.Symlink(outsideDir, evilParent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenRelative(meta.FileID, "escape/secret.md"); err == nil {
+		t.Fatal("expected parent-symlink escape rejection")
+	}
+}

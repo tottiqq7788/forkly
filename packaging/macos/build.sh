@@ -47,7 +47,6 @@ cat > "$APP/Contents/Info.plist" <<EOF
       <key>LSItemContentTypes</key>
       <array>
         <string>net.daringfireball.markdown</string>
-        <string>public.plain-text</string>
       </array>
       <key>CFBundleTypeExtensions</key>
       <array>

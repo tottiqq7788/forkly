@@ -23,6 +23,7 @@ type OpenFilesReceiver struct{}
 var (
 	openFilesMu      sync.Mutex
 	openFilesHandler func(paths []string)
+	openFilesPending [][]string
 )
 
 //export forklyOpenFilesBridge
@@ -38,12 +39,18 @@ func forklyOpenFilesBridge(paths **C.char, count C.int) {
 		}
 		out = append(out, C.GoString(slice[i]))
 	}
+	if len(out) == 0 {
+		return
+	}
 	openFilesMu.Lock()
 	h := openFilesHandler
-	openFilesMu.Unlock()
-	if h != nil && len(out) > 0 {
-		h(out)
+	if h == nil {
+		openFilesPending = append(openFilesPending, out)
+		openFilesMu.Unlock()
+		return
 	}
+	openFilesMu.Unlock()
+	h(out)
 }
 
 func (OpenFilesReceiver) CollectLaunchOpenFiles() []string {
@@ -67,6 +74,13 @@ func (OpenFilesReceiver) CollectLaunchOpenFiles() []string {
 func (OpenFilesReceiver) StartOpenFilesWatcher(handler func(paths []string)) {
 	openFilesMu.Lock()
 	openFilesHandler = handler
+	pending := openFilesPending
+	openFilesPending = nil
 	openFilesMu.Unlock()
 	C.forklyStartOpenFilesWatcher()
+	for _, paths := range pending {
+		if handler != nil && len(paths) > 0 {
+			handler(paths)
+		}
+	}
 }

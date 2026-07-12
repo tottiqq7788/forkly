@@ -139,6 +139,8 @@ func (s *Service) WriteAsset(fileID, preferredName string, data []byte) (gitexec
 }
 
 // OpenRelative opens a Markdown file relative to the current file's directory tree.
+// The resolved target must stay inside the original RootDir; leaf or parent symlinks
+// that escape the tree are rejected so a relative click cannot widen the sandbox.
 func (s *Service) OpenRelative(fileID, rel string) (Meta, error) {
 	e, err := s.lookup(fileID)
 	if err != nil {
@@ -155,11 +157,42 @@ func (s *Service) OpenRelative(fileID, rel string) (Meta, error) {
 	}
 	abs := filepath.Clean(filepath.Join(e.RootDir, filepath.FromSlash(joined)))
 	rootClean := filepath.Clean(e.RootDir)
-	sep := string(filepath.Separator)
-	if abs != rootClean && !strings.HasPrefix(abs, rootClean+sep) {
+	if !pathWithinRoot(abs, rootClean) {
 		return Meta{}, fmt.Errorf("路径超出当前文件目录")
 	}
-	return s.Open(abs)
+	info, err := os.Lstat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Meta{}, fmt.Errorf("文件不存在")
+		}
+		return Meta{}, fmt.Errorf("无法访问文件")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return Meta{}, fmt.Errorf("不支持通过符号链接打开相对文件")
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Meta{}, fmt.Errorf("文件不存在")
+		}
+		return Meta{}, fmt.Errorf("无法访问文件")
+	}
+	rootResolved := rootClean
+	if rr, err := filepath.EvalSymlinks(rootClean); err == nil {
+		rootResolved = rr
+	}
+	if !pathWithinRoot(resolved, rootResolved) {
+		return Meta{}, fmt.Errorf("路径超出当前文件目录")
+	}
+	return s.Open(resolved)
+}
+
+func pathWithinRoot(path, root string) bool {
+	if path == root {
+		return true
+	}
+	sep := string(filepath.Separator)
+	return strings.HasPrefix(path, root+sep)
 }
 
 func (s *Service) lookup(fileID string) (*entry, error) {
