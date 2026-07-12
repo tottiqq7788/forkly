@@ -36,6 +36,17 @@ image `File`s are read as Data URLs and still routed through `imageAction`.
 Body-mounted float / toolbar / tooltip nodes also receive `mu-portal` so
 Forkly can scope styles and z-index without targeting bare `body` children.
 
+## 4b. Paragraph front-button portal host + clip hide
+
+**File:** `src/ui/paragraphFrontButton/index.ts`
+
+- Mount `.mu-front-button-wrapper` into the nearest scroll/overflow ancestor of
+  the editor root (fallback: `document.body`) so `overflow: auto/hidden` clips
+  the drag handle to the editor viewport instead of letting it escape into page
+  chrome / overlays.
+- Use Floating UI `hide()` middleware to clear visibility when the reference
+  block is clipped or the floating node has escaped its boundary.
+
 ## 5. CSS isolation
 
 **File:** `src/assets/styles/index.css`

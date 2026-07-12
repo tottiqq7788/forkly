@@ -386,12 +386,18 @@
 }
 
 .forkly-md-editor-scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
   padding: 16px 24px 48px;
+}
+
+/* Keep paragraph drag handle below the overlay findbar and clipped by scroll. */
+.forkly-md-editor-scroll .mu-front-button-wrapper {
+  z-index: 5;
 }
 
 .forkly-md-editor-scroll::-webkit-scrollbar {

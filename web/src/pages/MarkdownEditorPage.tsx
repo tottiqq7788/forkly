@@ -23,7 +23,10 @@ import { MarkdownTocPanel } from "../components/files/markdown/MarkdownTocPanel"
 import { useMarkdownDocument } from "../components/files/markdown/useMarkdownDocument";
 import { useRegisterMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
+import { resolveActiveTocSlug, shouldApplyScrollDerivedTocActive } from "./tocScrollSync";
 import "../components/files/markdown/markdown-editor.css";
+
+const TOC_NAV_LOCK_MS = 2000;
 
 const STATUS_LABEL: Record<string, string> = {
   clean: "已保存",
@@ -122,6 +125,9 @@ function MarkdownEditorWorkspace({
 }) {
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
+  /** While set, ignore scroll-derived TOC highlights so smooth navigation does not flash intermediates. */
+  const tocNavLockRef = useRef<{ slug: string; timer: number | null } | null>(null);
+  const syncActiveFromScrollRef = useRef<() => void>(() => undefined);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [activeSlug, setActiveSlug] = useState("");
   const [editorError, setEditorError] = useState<Error | null>(null);
@@ -260,29 +266,82 @@ function MarkdownEditorWorkspace({
   useEffect(() => {
     const root = scrollRootRef.current;
     if (!root || toc.length === 0) return;
+    const scrollRoot = root;
+    const tocSlugs = toc.map((item) => item.slug);
 
-    const onScroll = () => {
+    function clearTocNavLock() {
+      const lock = tocNavLockRef.current;
+      if (!lock) return;
+      if (lock.timer != null) window.clearTimeout(lock.timer);
+      tocNavLockRef.current = null;
+    }
+
+    function syncActiveFromScroll() {
       const headings = Array.from(
-        root.querySelectorAll<HTMLElement>(".forkly-muya-mount h1, .forkly-muya-mount h2, .forkly-muya-mount h3, .forkly-muya-mount h4, .forkly-muya-mount h5, .forkly-muya-mount h6"),
+        scrollRoot.querySelectorAll<HTMLElement>(
+          ".forkly-muya-mount h1, .forkly-muya-mount h2, .forkly-muya-mount h3, .forkly-muya-mount h4, .forkly-muya-mount h5, .forkly-muya-mount h6",
+        ),
       );
       if (headings.length === 0) return;
-      const top = root.getBoundingClientRect().top + 24;
-      let current = toc[0]?.slug ?? "";
-      for (let i = 0; i < headings.length; i++) {
-        const rect = headings[i]!.getBoundingClientRect();
-        if (rect.top <= top) {
-          current = toc[i]?.slug ?? current;
-        } else {
-          break;
-        }
-      }
-      setActiveSlug((prev) => (prev === current ? prev : current));
-    };
+      const top = scrollRoot.getBoundingClientRect().top + 24;
+      const current = resolveActiveTocSlug(
+        headings.map((el) => el.getBoundingClientRect().top),
+        tocSlugs,
+        top,
+      );
 
-    onScroll();
-    root.addEventListener("scroll", onScroll, { passive: true });
-    return () => root.removeEventListener("scroll", onScroll);
+      const decision = shouldApplyScrollDerivedTocActive(tocNavLockRef.current?.slug, current);
+      if (decision.clearLock) clearTocNavLock();
+      if (!decision.apply) return;
+
+      setActiveSlug((prev) => (prev === current ? prev : current));
+    }
+
+    function onUserScrollIntent() {
+      if (!tocNavLockRef.current) return;
+      clearTocNavLock();
+      syncActiveFromScroll();
+    }
+
+    function onScrollEnd() {
+      if (!tocNavLockRef.current) return;
+      clearTocNavLock();
+      syncActiveFromScroll();
+    }
+
+    syncActiveFromScrollRef.current = syncActiveFromScroll;
+    syncActiveFromScroll();
+    scrollRoot.addEventListener("scroll", syncActiveFromScroll, { passive: true });
+    scrollRoot.addEventListener("scrollend", onScrollEnd);
+    scrollRoot.addEventListener("wheel", onUserScrollIntent, { passive: true });
+    scrollRoot.addEventListener("touchmove", onUserScrollIntent, { passive: true });
+    return () => {
+      clearTocNavLock();
+      if (syncActiveFromScrollRef.current === syncActiveFromScroll) {
+        syncActiveFromScrollRef.current = () => undefined;
+      }
+      scrollRoot.removeEventListener("scroll", syncActiveFromScroll);
+      scrollRoot.removeEventListener("scrollend", onScrollEnd);
+      scrollRoot.removeEventListener("wheel", onUserScrollIntent);
+      scrollRoot.removeEventListener("touchmove", onUserScrollIntent);
+    };
   }, [toc]);
+
+  function selectTocHeading(slug: string) {
+    setActiveSlug(slug);
+    const ok = editorRef.current?.scrollToHeading(slug) ?? false;
+    if (!ok) return;
+
+    const prev = tocNavLockRef.current;
+    if (prev?.timer != null) window.clearTimeout(prev.timer);
+    // Deadman unlock when scrollend is unavailable; sync so highlight is not stuck.
+    const timer = window.setTimeout(() => {
+      if (tocNavLockRef.current?.slug !== slug) return;
+      tocNavLockRef.current = null;
+      syncActiveFromScrollRef.current();
+    }, TOC_NAV_LOCK_MS);
+    tocNavLockRef.current = { slug, timer };
+  }
 
   async function copyDraft() {
     try {
@@ -395,10 +454,7 @@ function MarkdownEditorWorkspace({
         <MarkdownTocPanel
           items={toc}
           activeSlug={activeSlug}
-          onSelect={(slug) => {
-            const ok = editorRef.current?.scrollToHeading(slug);
-            if (ok) setActiveSlug(slug);
-          }}
+          onSelect={selectTocHeading}
         />
 
         <section className="forkly-md-editor-main">

@@ -2,7 +2,7 @@ import type { VNode } from 'snabbdom';
 import type Parent from '../../block/base/parent';
 import type { Muya } from '../../index';
 import type { IBaseOptions } from '../types';
-import { autoUpdate, computePosition, flip, offset } from '@floating-ui/dom';
+import { autoUpdate, computePosition, flip, hide, offset } from '@floating-ui/dom';
 
 import dragIcon from '../../assets/icons/drag/2.png';
 import BulletList from '../../block/commonMark/bulletList';
@@ -77,6 +77,35 @@ export class ParagraphFrontButton {
         this.listen();
     }
 
+    /**
+     * Mount the front-button portal inside the nearest scroll/clip ancestor of
+     * the editor root when possible. Body-mounted portals ignore overflow, so
+     * the drag handle can escape the editor viewport (and sit above overlays
+     * like Forkly's findbar). Prefer real scroll containers (`auto`/`scroll`)
+     * over mere `hidden` clip hosts. Falling back to `document.body` keeps
+     * upstream Electron hosts working.
+     */
+    private _resolvePortalHost(): HTMLElement {
+        const root = this.muya.domNode;
+        let el: HTMLElement | null = root?.parentElement ?? null;
+        let clipHost: HTMLElement | null = null;
+        while (el && el !== document.body) {
+            const style = window.getComputedStyle(el);
+            const overflowY = style.overflowY;
+            const overflow = style.overflow;
+            if (/(auto|scroll)/.test(overflowY) || /(auto|scroll)/.test(overflow))
+                return el;
+            if (
+                !clipHost
+                && (overflowY === 'hidden' || overflow === 'hidden')
+            ) {
+                clipHost = el;
+            }
+            el = el.parentElement;
+        }
+        return clipHost ?? document.body;
+    }
+
     init() {
         const { _floatBox: floatBox, _container: container, _iconWrapper: iconWrapper } = this;
         // Use to remember which float container is shown.
@@ -85,7 +114,7 @@ export class ParagraphFrontButton {
         floatBox.classList.add('mu-front-button-wrapper');
         floatBox.classList.add('mu-portal');
         floatBox.appendChild(container);
-        document.body.appendChild(floatBox);
+        this._resolvePortalHost().appendChild(floatBox);
 
         // Since the size of the container is not fixed and changes according to the change of content,
         // the floatBox needs to set the size according to the container size
@@ -376,6 +405,8 @@ export class ParagraphFrontButton {
                 left: `-9999px`,
                 top: `-9999px`,
                 opacity: '0',
+                visibility: 'hidden',
+                pointerEvents: 'none',
             });
         }
 
@@ -421,12 +452,20 @@ export class ParagraphFrontButton {
                         alignmentAxis: alignmentAxisValue,
                     }),
                     flip(),
+                    // Hide when the block is clipped by a scroll/overflow ancestor
+                    // so the handle cannot linger outside the editor viewport.
+                    hide(),
                 ],
-            }).then(({ x, y }) => {
+            }).then(({ x, y, middlewareData }) => {
+                const clipped = Boolean(
+                    middlewareData.hide?.referenceHidden || middlewareData.hide?.escaped,
+                );
                 Object.assign(floatBox.style, {
                     left: `${x}px`,
                     top: `${y}px`,
-                    opacity: 1,
+                    opacity: clipped ? '0' : '1',
+                    visibility: clipped ? 'hidden' : 'visible',
+                    pointerEvents: clipped ? 'none' : 'auto',
                 });
             });
         };
