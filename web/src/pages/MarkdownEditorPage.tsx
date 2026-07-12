@@ -101,7 +101,7 @@ export default function MarkdownEditorPage() {
 
   return (
     <MarkdownEditorWorkspace
-      key={`${id}:${path}:${file.revision ?? ""}`}
+      key={`${id}:${path}`}
       projectID={id}
       projectName={(project.data as Project | undefined)?.name || id}
       file={file}
@@ -343,8 +343,18 @@ function MarkdownEditorWorkspace({
       ) : null}
 
       {editorError ? (
-        <div className="forkly-md-editor-banner text-sm text-[var(--color-warning-fg)] px-4 py-2">
-          编辑器加载失败：{editorError.message}
+        <div className="forkly-md-editor-banner flex items-center gap-3 text-sm text-[var(--color-warning-fg)] px-4 py-2">
+          <span className="min-w-0 flex-1">编辑器加载失败：{editorError.message}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)]"
+            onClick={() => {
+              setEditorError(null);
+              setEditorKey((k) => k + 1);
+            }}
+          >
+            重新加载编辑器
+          </button>
         </div>
       ) : null}
 
@@ -480,6 +490,7 @@ function MarkdownEditorWorkspace({
 
           <div ref={scrollRootRef} className="forkly-md-editor-scroll">
             <EditorErrorBoundary
+              resetKey={editorKey}
               onFallback={(err) => {
                 setEditorError(err);
               }}
@@ -492,6 +503,21 @@ function MarkdownEditorWorkspace({
                 markdownPath={file.path}
                 onChange={() => setDraftFromEditor()}
                 onTocChange={setToc}
+                onOpenPath={(targetPath) => {
+                  if (!isMarkdownPath(targetPath)) {
+                    window.open(
+                      `/projects/${projectID}?path=${encodeURIComponent(targetPath)}`,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                    return;
+                  }
+                  window.open(
+                    `/projects/${projectID}/editor?path=${encodeURIComponent(targetPath)}`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
                 onError={(err) => setEditorError(err)}
               />
             </EditorErrorBoundary>
@@ -520,7 +546,7 @@ function FullPageMessage({ title, body }: { title: string; body: string }) {
 }
 
 class EditorErrorBoundary extends Component<
-  { children: ReactNode; onFallback: (err: Error) => void },
+  { children: ReactNode; resetKey: number; onFallback: (err: Error) => void },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null };
@@ -532,6 +558,12 @@ class EditorErrorBoundary extends Component<
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Markdown editor failed", error, info);
     this.props.onFallback(error);
+  }
+
+  componentDidUpdate(prevProps: { resetKey: number }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
   }
 
   render() {

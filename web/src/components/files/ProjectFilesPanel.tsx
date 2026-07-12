@@ -566,7 +566,11 @@ function TreeNode({
         {canEditMarkdown ? (
           <button
             type="button"
-            className="shrink-0 rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-tertiary)] opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 hover:text-[var(--color-accent-muted)] hover:bg-[var(--color-surface)]"
+            className={`shrink-0 rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-tertiary)] focus-visible:opacity-100 hover:text-[var(--color-accent-muted)] hover:bg-[var(--color-surface)] ${
+              active
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            }`}
             title="在新标签页编辑"
             aria-label={`编辑 ${entry.name}`}
             onClick={(e) => {

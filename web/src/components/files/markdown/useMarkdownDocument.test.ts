@@ -130,4 +130,36 @@ describe("useMarkdownDocument", () => {
     expect(result.current.conflictDiskContent).toBe("# disk");
     expect(result.current.draftMarkdown).toBe("# draft");
   });
+
+  it("keeps dirty draft and enters conflict when initial revision refreshes", async () => {
+    const { result, rerender } = renderHook(
+      ({ initial }) =>
+        useMarkdownDocument({
+          projectID: "p1",
+          source: "worktree",
+          path: "docs/a.md",
+          initial,
+          enabled: true,
+        }),
+      { initialProps: { initial: initialFile() } },
+    );
+
+    result.current.registerSerializer({
+      flush: () => undefined,
+      getMarkdown: () => "# local-draft",
+    });
+
+    act(() => {
+      result.current.setDraftFromEditor();
+    });
+    expect(result.current.saveStatus).toBe("dirty");
+
+    rerender({
+      initial: initialFile({ content: "# from-disk", revision: "rev-2" }),
+    });
+
+    expect(result.current.saveStatus).toBe("conflict");
+    expect(result.current.conflictDiskContent).toBe("# from-disk");
+    expect(result.current.draftMarkdown).toBe("# local-draft");
+  });
 });

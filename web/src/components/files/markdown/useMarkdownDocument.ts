@@ -155,7 +155,7 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
     }, AUTOSAVE_MS);
   };
 
-  // Reset when switching files / initial payload identity.
+  // Hard reset when switching document identity (not when React Query refreshes the same file).
   useEffect(() => {
     cancelledRef.current = false;
     const content = initial.content ?? "";
@@ -178,7 +178,56 @@ export function useMarkdownDocument({ projectID, source, path, initial, enabled 
       cancelledRef.current = true;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [projectID, source, path, initial.revision, initial.content, setStatus]);
+    // Intentionally omit initial.revision/content — soft-sync handles same-path refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectID, source, path, setStatus]);
+
+  // Soft sync: adopt clean disk updates; if local edits exist, enter conflict instead of wiping draft.
+  useEffect(() => {
+    if (!enabled) return;
+    const nextRev = initial.revision ?? "";
+    if (!nextRev || nextRev === baseRevisionRef.current) return;
+    const nextContent = initial.content ?? "";
+
+    const blocking =
+      statusRef.current === "dirty" ||
+      statusRef.current === "saving" ||
+      statusRef.current === "conflict" ||
+      statusRef.current === "error";
+
+    if (blocking) {
+      // Capture latest editor text before conflict UI so we don't show a stale draft.
+      try {
+        const ser = serializerRef.current;
+        if (ser) {
+          ser.flush();
+          const md = ser.getMarkdown();
+          draftRef.current = md;
+          setDraftMarkdown(md);
+        }
+      } catch {
+        // ignore serializer failures during external refresh
+      }
+      setConflictDiskContent(nextContent);
+      baseRevisionRef.current = nextRev;
+      etagRef.current = `"${nextRev}"`;
+      if (statusRef.current !== "conflict") {
+        setLastError("文件已在外部被修改");
+        setStatus("conflict");
+      }
+      return;
+    }
+
+    draftRef.current = nextContent;
+    setDraftMarkdown(nextContent);
+    baseRevisionRef.current = nextRev;
+    etagRef.current = `"${nextRev}"`;
+    editVersionRef.current = 0;
+    savedVersionRef.current = 0;
+    setConflictDiskContent(null);
+    setLastError(null);
+    setStatus("clean");
+  }, [enabled, initial.revision, initial.content, setStatus]);
 
   const setDraftFromEditor = useCallback(() => {
     if (!enabledRef.current) return;
