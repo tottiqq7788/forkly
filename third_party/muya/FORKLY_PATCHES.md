@@ -92,6 +92,8 @@ Forkly changes:
   clears the hide timer. Toolbar `mousedown` is cancelled so toggling does not
   blur-then-reenter source mode. Entering source activates the block (expands the
   0×0 source container) before focusing, so the 2nd/3rd toggle keeps working.
+- Preview uses the existing code glyph for “View Source”; source mode uses an
+  inline SVG line-chart glyph for “View Diagram”, avoiding raster sprite cropping.
 - `downloadDiagramPreviewAsPng` rasterizes the preview SVG onto a canvas with
   `--editor-bg-color`, rejects zero-size / cross-origin `<img>` exports, and
   caps canvas dimensions to avoid OOMs.

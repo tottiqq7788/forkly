@@ -76,6 +76,30 @@ function resolvePreviewHost(
     return null;
 }
 
+function renderLineChartIcon() {
+    return h(
+        'svg.diagram-line-chart-icon',
+        {
+            attrs: {
+                'viewBox': '0 0 16 16',
+                'aria-hidden': 'true',
+            },
+        },
+        [
+            h('path', {
+                attrs: {
+                    'd': 'M2.5 13.5V2.5M2.5 13.5H14M4 11L7 7.5L9.5 9.25L13 4.75',
+                    'fill': 'none',
+                    'stroke': 'currentColor',
+                    'stroke-width': '1.5',
+                    'stroke-linecap': 'round',
+                    'stroke-linejoin': 'round',
+                },
+            }),
+        ],
+    );
+}
+
 export class PreviewToolBar extends BaseFloat {
     static pluginName = 'previewTools';
     private _oldVNode: VNode | null = null;
@@ -251,16 +275,18 @@ export class PreviewToolBar extends BaseFloat {
             const iconWrapperSelector = 'div.icon-wrapper';
             const icon = h(
                 'i.icon',
-                h(
-                    'i.icon-inner',
-                    {
-                        style: {
-                            'background': `url(${i.icon}) no-repeat`,
-                            'background-size': '100%',
-                        },
-                    },
-                    '',
-                ),
+                i.glyph === 'line-chart'
+                    ? renderLineChartIcon()
+                    : h(
+                            'i.icon-inner',
+                            {
+                                style: {
+                                    'background': `url(${i.icon}) no-repeat`,
+                                    'background-size': '100%',
+                                },
+                            },
+                            '',
+                        ),
             );
             const iconWrapper = h(iconWrapperSelector, icon);
 

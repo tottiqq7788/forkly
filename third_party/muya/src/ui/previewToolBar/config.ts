@@ -1,13 +1,13 @@
 import CodeIcon from '../../assets/icons/code/2.png';
 import DeleteIcon from '../../assets/icons/delete/2.png';
 import EditIcon from '../../assets/icons/edit.png';
-import LineChartIcon from '../../assets/icons/line_chart/2.png';
 import ImageIcon from '../../assets/icons/format_image/2.png';
 
 export type PreviewToolIcon = {
     type: string;
     tooltip: string;
     icon: string;
+    glyph?: 'line-chart';
 };
 
 /** Default tools for html-block / math-block. */
@@ -34,7 +34,8 @@ export const DIAGRAM_SOURCE_ICON: PreviewToolIcon = {
 export const DIAGRAM_PREVIEW_ICON: PreviewToolIcon = {
     type: 'toggle',
     tooltip: 'View Diagram',
-    icon: LineChartIcon,
+    icon: '',
+    glyph: 'line-chart',
 };
 
 export const DIAGRAM_EXPORT_ICON: PreviewToolIcon = {

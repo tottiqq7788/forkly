@@ -69,6 +69,7 @@ describe('PreviewToolBar — diagram hover tools', () => {
         expect(items).toHaveLength(2);
         expect(items[0].classList.contains('toggle')).toBe(true);
         expect(items[0].getAttribute('title')).toBe('查看源码');
+        expect(items[0].querySelector('i.icon-inner')).toBeTruthy();
         expect(items[1].classList.contains('export')).toBe(true);
         expect(items[1].getAttribute('title')).toBe('导出 PNG');
     });
@@ -87,6 +88,8 @@ describe('PreviewToolBar — diagram hover tools', () => {
 
         const toggle = toolbar.container!.querySelector('li.item.toggle')!;
         expect(toggle.getAttribute('title')).toBe('查看图形');
+        expect(toggle.querySelector('svg.diagram-line-chart-icon')).toBeTruthy();
+        expect(toggle.querySelector('i.icon-inner')).toBeFalsy();
     });
 
     it('keeps the toolbar open when the pointer moves onto the float portal', () => {
