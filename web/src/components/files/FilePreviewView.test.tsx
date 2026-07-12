@@ -6,6 +6,8 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { FilePreviewView } from "./FilePreviewView";
 import { MarkdownSaveGuardProvider } from "./markdown/MarkdownSaveGuard";
 import type { FileContent } from "../../api";
+import { useState } from "react";
+import type { MarkdownViewerMode } from "./markdown/MarkdownDocumentView";
 
 function wrap(ui: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -37,27 +39,25 @@ function mdFile(over: Partial<FileContent> = {}): FileContent {
 }
 
 describe("FilePreviewView markdown modes", () => {
-  it("defaults to preview for non-editable markdown", async () => {
+  it("defaults to preview for markdown", async () => {
     wrap(<FilePreviewView file={mdFile()} projectID="p1" />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Hello" }, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Hello" }, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "预览" })).toBeNull();
     expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
   });
 
-  it("shows edit mode for editable worktree markdown", async () => {
+  it("does not mount an inline editor for editable markdown", async () => {
     wrap(<FilePreviewView file={mdFile({ editable: true, revision: "abc" })} projectID="p1" />);
-    expect(await screen.findByRole("button", { name: "编辑" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await screen.findByRole("heading", { level: 1, name: "Hello" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    expect(document.querySelector(".forkly-muya-mount")).toBeNull();
   });
 
-  it("can switch to source", async () => {
-    const user = userEvent.setup();
-    wrap(<FilePreviewView file={mdFile()} projectID="p1" />);
-    await screen.findByRole("heading", { level: 1, name: "Hello" });
-    await user.click(screen.getByRole("button", { name: "源码" }));
-    expect(screen.getByText(/# Hello/)).toBeInTheDocument();
+  it("can switch to source via viewMode prop", async () => {
+    wrap(<FilePreviewView file={mdFile()} projectID="p1" viewMode="source" />);
+    expect(await screen.findByText(/# Hello/)).toBeInTheDocument();
   });
 
   it("does not show mode toggle for plain text", () => {
@@ -73,51 +73,57 @@ describe("FilePreviewView markdown modes", () => {
 
   it("forces source for truncated markdown", async () => {
     wrap(
-      <FilePreviewView file={mdFile({ truncated: true, content: "# partial" })} projectID="p1" />,
+      <FilePreviewView
+        file={mdFile({ truncated: true, content: "# partial" })}
+        projectID="p1"
+        viewMode="preview"
+      />,
     );
-    expect(await screen.findByRole("button", { name: "预览" })).toBeDisabled();
-    expect(screen.getByText(/# partial/)).toBeInTheDocument();
+    expect(await screen.findByText(/# partial/)).toBeInTheDocument();
   });
 
-  it("resets to preview when path changes", async () => {
-    const user = userEvent.setup();
+  it("follows viewMode when path changes", async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    function Host({ file }: { file: FileContent }) {
+    function Host({ file, mode }: { file: FileContent; mode: MarkdownViewerMode }) {
       return (
         <MarkdownSaveGuardProvider>
-          <FilePreviewView file={file} projectID="p1" />
+          <FilePreviewView file={file} projectID="p1" viewMode={mode} />
         </MarkdownSaveGuardProvider>
       );
     }
-    const router = createMemoryRouter([{ path: "/", element: <Host file={mdFile()} /> }], {
+    function App() {
+      const [mode, setMode] = useState<MarkdownViewerMode>("source");
+      const [file, setFile] = useState(mdFile());
+      return (
+        <div>
+          <button type="button" onClick={() => setMode("preview")}>
+            to-preview
+          </button>
+          <button
+            type="button"
+            onClick={() => setFile(mdFile({ path: "docs/other.md", content: "# Other" }))}
+          >
+            change-file
+          </button>
+          <Host file={file} mode={mode} />
+        </div>
+      );
+    }
+    const router = createMemoryRouter([{ path: "/", element: <App /> }], {
       initialEntries: ["/"],
     });
-    const { rerender } = render(
+    const user = userEvent.setup();
+    render(
       <QueryClientProvider client={qc}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
-    await screen.findByRole("heading", { level: 1, name: "Hello" });
-    await user.click(screen.getByRole("button", { name: "源码" }));
-
-    const router2 = createMemoryRouter(
-      [
-        {
-          path: "/",
-          element: (
-            <Host file={mdFile({ path: "docs/other.md", content: "# Other" })} />
-          ),
-        },
-      ],
-      { initialEntries: ["/"] },
-    );
-    rerender(
-      <QueryClientProvider client={qc}>
-        <RouterProvider router={router2} />
-      </QueryClientProvider>,
-    );
+    expect(await screen.findByText(/# Hello/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "change-file" }));
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1, name: "Other" })).toBeInTheDocument();
+      expect(screen.getByText(/# Other/)).toBeInTheDocument();
     });
+    await user.click(screen.getByRole("button", { name: "to-preview" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Other" })).toBeInTheDocument();
   });
 });

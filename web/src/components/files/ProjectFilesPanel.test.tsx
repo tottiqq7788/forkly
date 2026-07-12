@@ -57,7 +57,7 @@ describe("ProjectFilesPanel selection", () => {
     const oldFile = await screen.findByTitle("a.txt");
     const newFile = screen.getByTitle("b.txt");
     await waitFor(() => {
-      expect(oldFile).toHaveClass("bg-[var(--color-surface-active)]");
+      expect(oldFile.parentElement).toHaveClass("bg-[var(--color-surface-active)]");
     });
 
     await user.click(newFile);
@@ -66,8 +66,8 @@ describe("ProjectFilesPanel selection", () => {
     });
 
     expect(onPathChange).toHaveBeenCalledWith("b.txt");
-    expect(newFile).toHaveClass("bg-[var(--color-surface-active)]");
-    expect(oldFile).not.toHaveClass("bg-[var(--color-surface-active)]");
+    expect(newFile.parentElement).toHaveClass("bg-[var(--color-surface-active)]");
+    expect(oldFile.parentElement).not.toHaveClass("bg-[var(--color-surface-active)]");
 
     // Router now publishes the requested URL, then a later external URL
     // change must still remain authoritative.
@@ -95,6 +95,69 @@ describe("ProjectFilesPanel selection", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByTitle("a.txt")).toHaveClass("bg-[var(--color-surface-active)]");
+    expect((await screen.findByTitle("a.txt")).parentElement).toHaveClass(
+      "bg-[var(--color-surface-active)]",
+    );
+  });
+
+  it("shows markdown mode footer and edit affordance for worktree markdown", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        return {
+          path: "",
+          source: "worktree",
+          entries: [
+            { name: "note.md", path: "note.md", kind: "file" },
+            { name: "a.txt", path: "a.txt", kind: "file" },
+          ],
+          offset: 0,
+          limit: 200,
+          hasMore: false,
+        };
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return {
+          path,
+          source: "worktree",
+          kind: "text",
+          content: path.endsWith(".md") ? "# Hi" : path,
+          size: 4,
+          editable: path.endsWith(".md"),
+          revision: "r1",
+        };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" preferredPath="note.md" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "预览" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "源码" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 note.md" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "编辑 note.md" }));
+    expect(openSpy).toHaveBeenCalledWith(
+      "/projects/p1/editor?path=note.md",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    await user.click(screen.getByTitle("a.txt"));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "预览" })).toBeNull();
+    });
+
+    openSpy.mockRestore();
   });
 });

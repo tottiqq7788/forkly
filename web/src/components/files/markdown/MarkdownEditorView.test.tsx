@@ -11,8 +11,17 @@ vi.mock("@muyajs/core", () => {
     on() {}
     off() {}
     flush() {}
+    getTOC() {
+      return [];
+    }
+    scrollToHeading() {
+      return false;
+    }
     getMarkdown() {
       return "# hello";
+    }
+    get domNode() {
+      return document.createElement("div");
     }
     setContent() {}
     format() {}

@@ -1,12 +1,14 @@
 import { lazy, Suspense } from "react";
 import { FileContent } from "../../api";
 import { isMarkdownPath } from "./markdown/isMarkdown";
+import type { MarkdownViewerMode } from "./markdown/MarkdownDocumentView";
 
 const MarkdownDocumentView = lazy(() => import("./markdown/MarkdownDocumentView"));
 
 type Props = {
   file: FileContent;
   projectID: string;
+  viewMode?: MarkdownViewerMode;
   onOpenPath?: (path: string, fragment?: string) => void;
   pendingFragment?: string;
   onFragmentConsumed?: () => void;
@@ -15,6 +17,7 @@ type Props = {
 export function FilePreviewView({
   file,
   projectID,
+  viewMode = "preview",
   onOpenPath,
   pendingFragment = "",
   onFragmentConsumed,
@@ -30,6 +33,7 @@ export function FilePreviewView({
         <MarkdownDocumentView
           file={file}
           projectID={projectID}
+          viewMode={viewMode}
           onOpenPath={onOpenPath}
           pendingFragment={pendingFragment}
           onFragmentConsumed={onFragmentConsumed}

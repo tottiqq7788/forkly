@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { CaretRight, File as FileIcon, FolderSimple, LinkSimple } from "@phosphor-icons/react";
+import {
+  CaretRight,
+  File as FileIcon,
+  FolderSimple,
+  LinkSimple,
+  PencilSimple,
+} from "@phosphor-icons/react";
 import { api, BrowseSource, FileContent, TreeEntry, TreeListing } from "../../api";
 import { FilePreviewView } from "./FilePreviewView";
 import { useMarkdownSaveGuard } from "./markdown/MarkdownSaveGuard";
+import { isMarkdownPath } from "./markdown/isMarkdown";
+import type { MarkdownViewerMode } from "./markdown/MarkdownDocumentView";
 import { isGitMetaPath, parentDirsOf } from "./markdown/markdownPath";
 
 type Props = {
@@ -41,6 +49,7 @@ export function ProjectFilesPanel({
   });
   const [loadedDirs, setLoadedDirs] = useState<Record<string, TreeEntry[]>>({});
   const [pendingFragment, setPendingFragment] = useState("");
+  const [mdViewMode, setMdViewMode] = useState<MarkdownViewerMode>("preview");
   const knownBranchKey = useRef("");
   // A local click updates selection before React Router delivers the new URL
   // prop. Ignore the old preferredPath during that short hand-off, otherwise
@@ -232,6 +241,11 @@ export function ProjectFilesPanel({
     setSource(next);
   }
 
+  function openMarkdownEditor(path: string) {
+    const url = `/projects/${projectID}/editor?path=${encodeURIComponent(path)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   function toggleDir(path: string) {
     setExpandedBySource((prev) => {
       const next = new Set(prev[source]);
@@ -240,6 +254,10 @@ export function ProjectFilesPanel({
       return { ...prev, [source]: next };
     });
   }
+
+  const activeIsMarkdown =
+    !!activePath && isMarkdownPath(activePath) && preview.data?.kind !== "binary";
+  const previewDisabled = !!preview.data?.truncated || preview.data?.content == null;
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -287,12 +305,31 @@ export function ProjectFilesPanel({
                     onExpandDirs={expandDirs}
                     onEntriesLoaded={reportEntries}
                     onSelectFile={selectFile}
+                    onEditMarkdown={openMarkdownEditor}
                   />
                 ))
               )}
             </>
           )}
         </div>
+        {activeIsMarkdown ? (
+          <div
+            className="shrink-0 border-t border-[var(--color-border)] p-2 flex gap-1"
+            role="group"
+            aria-label="Markdown 显示模式"
+          >
+            <ModeButton
+              active={mdViewMode === "preview"}
+              disabled={previewDisabled}
+              onClick={() => setMdViewMode("preview")}
+            >
+              预览
+            </ModeButton>
+            <ModeButton active={mdViewMode === "source"} onClick={() => setMdViewMode("source")}>
+              源码
+            </ModeButton>
+          </div>
+        ) : null}
       </section>
 
       <section className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
@@ -314,6 +351,7 @@ export function ProjectFilesPanel({
               <FilePreviewView
                 file={preview.data}
                 projectID={projectID}
+                viewMode={mdViewMode}
                 onOpenPath={openFromMarkdown}
                 pendingFragment={pendingFragment}
                 onFragmentConsumed={() => setPendingFragment("")}
@@ -344,6 +382,34 @@ function SourceButton({
           ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
           : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
       }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ModeButton({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex-1 rounded-[var(--radius-sm)] px-2 py-1.5 text-xs transition-colors ${
+        active
+          ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
+      } disabled:opacity-40 disabled:cursor-not-allowed`}
     >
       {children}
     </button>
@@ -400,6 +466,7 @@ function TreeNode({
   onExpandDirs,
   onEntriesLoaded,
   onSelectFile,
+  onEditMarkdown,
 }: {
   projectID: string;
   source: BrowseSource;
@@ -411,10 +478,13 @@ function TreeNode({
   onExpandDirs: (paths: string[]) => void;
   onEntriesLoaded: (dirPath: string, entries: TreeEntry[]) => void;
   onSelectFile: (path: string) => void | Promise<void>;
+  onEditMarkdown: (path: string) => void;
 }) {
   const isDir = entry.kind === "dir";
   const isOpen = isDir && expanded.has(entry.path);
   const active = activePath === entry.path;
+  const canEditMarkdown =
+    source === "worktree" && entry.kind === "file" && isMarkdownPath(entry.path);
 
   const childQuery = useInfiniteQuery({
     queryKey: ["workspace-tree", projectID, source, entry.path],
@@ -459,37 +529,55 @@ function TreeNode({
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => {
-          if (isDir) onToggleDir(entry.path);
-          else onSelectFile(entry.path);
-        }}
-        className={`w-full flex items-center gap-1 rounded-[var(--radius-sm)] px-1 py-1 text-xs text-left ${
+      <div
+        className={`group w-full flex items-center gap-1 rounded-[var(--radius-sm)] px-1 py-1 text-xs ${
           active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
         }`}
         style={{ paddingLeft: 4 + depth * 14 }}
-        title={entry.path}
       >
-        <span className="w-3 shrink-0 text-[var(--color-text-tertiary)]">
-          {isDir ? (
-            <CaretRight
-              size={12}
-              className={`transition-transform ${isOpen ? "rotate-90" : ""}`}
-            />
-          ) : null}
-        </span>
-        <span className="shrink-0 text-[var(--color-text-secondary)]">
-          {isDir ? (
-            <FolderSimple size={14} />
-          ) : entry.kind === "symlink" ? (
-            <LinkSimple size={14} />
-          ) : (
-            <FileIcon size={14} />
-          )}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (isDir) onToggleDir(entry.path);
+            else onSelectFile(entry.path);
+          }}
+          className="min-w-0 flex-1 flex items-center gap-1 text-left"
+          title={entry.path}
+        >
+          <span className="w-3 shrink-0 text-[var(--color-text-tertiary)]">
+            {isDir ? (
+              <CaretRight
+                size={12}
+                className={`transition-transform ${isOpen ? "rotate-90" : ""}`}
+              />
+            ) : null}
+          </span>
+          <span className="shrink-0 text-[var(--color-text-secondary)]">
+            {isDir ? (
+              <FolderSimple size={14} />
+            ) : entry.kind === "symlink" ? (
+              <LinkSimple size={14} />
+            ) : (
+              <FileIcon size={14} />
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
+        </button>
+        {canEditMarkdown ? (
+          <button
+            type="button"
+            className="shrink-0 rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-tertiary)] opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 hover:text-[var(--color-accent-muted)] hover:bg-[var(--color-surface)]"
+            title="在新标签页编辑"
+            aria-label={`编辑 ${entry.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditMarkdown(entry.path);
+            }}
+          >
+            <PencilSimple size={14} />
+          </button>
+        ) : null}
+      </div>
       {isOpen && (
         <div>
           {childQuery.isLoading && (
@@ -521,6 +609,7 @@ function TreeNode({
               onExpandDirs={onExpandDirs}
               onEntriesLoaded={onEntriesLoaded}
               onSelectFile={onSelectFile}
+              onEditMarkdown={onEditMarkdown}
             />
           ))}
         </div>

@@ -6,8 +6,16 @@ import {
   type CSSProperties,
 } from "react";
 import { assetURL, uploadMarkdownAsset } from "../../../api";
+import { copyHeadingAnchor } from "./copyHeadingAnchor";
 import { resolveMarkdownImage, resolveMarkdownLink } from "./markdownPath";
 import "./markdown-editor.css";
+
+export type TocItem = {
+  content: string;
+  lvl: number;
+  slug: string;
+  githubSlug: string;
+};
 
 export type MarkdownEditorHandle = {
   flush: () => void;
@@ -22,6 +30,8 @@ export type MarkdownEditorHandle = {
   hideAllFloatTools: () => void;
   focus: () => void;
   setContent: (markdown: string) => void;
+  getTOC: () => TocItem[];
+  scrollToHeading: (slug: string) => boolean;
 };
 
 export type SearchOpts = {
@@ -41,6 +51,7 @@ type Props = {
   markdownPath: string;
   hidden?: boolean;
   onChange?: () => void;
+  onTocChange?: (toc: TocItem[]) => void;
   onOpenPath?: (path: string, fragment?: string) => void;
   onReady?: () => void;
   onError?: (err: Error) => void;
@@ -63,8 +74,26 @@ type MuyaInstance = {
   setContent: (content: string, autoFocus?: boolean) => void;
   on: (event: string, listener: (...args: unknown[]) => void) => void;
   off: (event: string, listener: (...args: unknown[]) => void) => void;
+  getTOC: () => TocItem[];
   options: Record<string, unknown>;
+  domNode?: HTMLElement | null;
 };
+
+function headingElements(root: HTMLElement | null | undefined): HTMLElement[] {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"));
+}
+
+function scrollToHeadingBySlug(muya: MuyaInstance, slug: string): boolean {
+  const toc = muya.getTOC();
+  const index = toc.findIndex((item) => item.slug === slug);
+  if (index < 0) return false;
+  const headings = headingElements(muya.domNode);
+  const target = headings[index];
+  if (!target) return false;
+  target.scrollIntoView({ block: "start", behavior: "smooth" });
+  return true;
+}
 
 const SAFE_UPLOAD_DATA = /^data:image\/(png|jpe?g|gif|webp);base64,/i;
 const EMPTY_SEARCH: SearchResult = { matches: [], index: -1 };
@@ -111,7 +140,17 @@ function stripPlantUMLFromQuickInsert(muya: MuyaInstance) {
 }
 
 export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(function MarkdownEditorView(
-  { markdown, projectID, markdownPath, hidden = false, onChange, onOpenPath, onReady, onError },
+  {
+    markdown,
+    projectID,
+    markdownPath,
+    hidden = false,
+    onChange,
+    onTocChange,
+    onOpenPath,
+    onReady,
+    onError,
+  },
   ref,
 ) {
   const outerRef = useRef<HTMLDivElement>(null);
@@ -121,6 +160,8 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
   markdownRef.current = markdown;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onTocChangeRef = useRef(onTocChange);
+  onTocChangeRef.current = onTocChange;
   const onOpenPathRef = useRef(onOpenPath);
   onOpenPathRef.current = onOpenPath;
   const projectIDRef = useRef(projectID);
@@ -141,6 +182,12 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
     hideAllFloatTools: () => muyaRef.current?.hideAllFloatTools(),
     focus: () => muyaRef.current?.focus(),
     setContent: (md) => muyaRef.current?.setContent(md),
+    getTOC: () => muyaRef.current?.getTOC() ?? [],
+    scrollToHeading: (slug) => {
+      const muya = muyaRef.current;
+      if (!muya) return false;
+      return scrollToHeadingBySlug(muya, slug);
+    },
   }));
 
   useEffect(() => {
@@ -156,6 +203,7 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
     let cancelled = false;
     let muya: MuyaInstance | null = null;
     let changeHandler: ((...args: unknown[]) => void) | null = null;
+    let copyLinkHandler: ((...args: unknown[]) => void) | null = null;
     let ro: ResizeObserver | null = null;
 
     void (async () => {
@@ -210,8 +258,11 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
                   onOpenPathRef.current?.(resolved.path, resolved.fragment || undefined);
                 } else if (resolved.kind === "external") {
                   window.open(resolved.href, "_blank", "noopener,noreferrer");
-                } else if (resolved.kind === "fragment") {
-                  // In-editor heading jump: leave to Muya/TOC when available.
+                } else if (resolved.kind === "fragment" && muyaRef.current) {
+                  const frag = resolved.fragment;
+                  const toc = muyaRef.current.getTOC();
+                  const match = toc.find((item) => item.githubSlug === frag || item.slug === frag);
+                  if (match) scrollToHeadingBySlug(muyaRef.current, match.slug);
                 }
               },
             },
@@ -301,10 +352,25 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
         muya.init();
         stripPlantUMLFromQuickInsert(muya);
 
-        changeHandler = () => onChangeRef.current?.();
+        changeHandler = () => {
+          onChangeRef.current?.();
+          onTocChangeRef.current?.(muya?.getTOC() ?? []);
+        };
         muya.on("json-change", changeHandler);
 
+        // Hover affordance on headings emits stable slug; copy GitHub-style #anchor.
+        copyLinkHandler = (...args: unknown[]) => {
+          const payload = args[0] as { key?: string } | undefined;
+          const key = payload?.key;
+          if (!key || !muya) return;
+          void copyHeadingAnchor(muya.getTOC(), key).catch(() => {
+            // Clipboard may be denied; ignore.
+          });
+        };
+        muya.on("heading-copy-link", copyLinkHandler);
+
         muyaRef.current = muya;
+        onTocChangeRef.current?.(muya.getTOC());
         onReady?.();
       } catch (err) {
         if (!cancelled) {
@@ -326,6 +392,13 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
       if (muya && changeHandler) {
         try {
           muya.off("json-change", changeHandler);
+        } catch {
+          // ignore
+        }
+      }
+      if (muya && copyLinkHandler) {
+        try {
+          muya.off("heading-copy-link", copyLinkHandler);
         } catch {
           // ignore
         }
