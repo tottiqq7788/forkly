@@ -84,8 +84,8 @@ function buildCategories(): ToolCategory[] {
   return [
     {
       id: "history",
-      label: "历史",
-      title: "历史操作",
+      label: "追溯",
+      title: "追溯操作",
       icon: <ArrowsClockwise size={18} />,
       items: [
         {

@@ -773,7 +773,8 @@ figure.mu-diagram-block {
 }
 
 figure.mu-html-block:not(.mu-active, .mu-disable-html-render):hover,
-figure.mu-math-block:not(.mu-active):hover {
+figure.mu-math-block:not(.mu-active):hover,
+figure.mu-diagram-block:not(.mu-active):hover {
     background: var(--editor-color-04);
 }
 
@@ -829,8 +830,7 @@ figure.mu-diagram-block .mu-diagram-preview svg.sequence path[fill='#fff'] {
     fill: var(--editor-bg-color);
 }
 
-figure.mu-active.mu-math-block > div.mu-math-preview,
-figure.mu-active.mu-diagram-block > div.mu-diagram-preview {
+figure.mu-active.mu-math-block > div.mu-math-preview {
     position: absolute;
     top: calc(100% + 20px);
     left: 50%;
@@ -845,6 +845,13 @@ figure.mu-active.mu-diagram-block > div.mu-diagram-preview {
     border-radius: 4px;
     box-shadow: 0 2px 12px 0 rgb(0 0 0 / 10%);
     transform: translateX(-50%);
+}
+
+/* Diagram: source and preview are mutually exclusive in document flow.
+   Activating the block shows the source container only — never float the
+   rendered preview over subsequent content. */
+figure.mu-active.mu-diagram-block > div.mu-diagram-preview {
+    display: none;
 }
 
 figure.mu-math-block span.mu-codeblock-content:first-of-type:empty::after {

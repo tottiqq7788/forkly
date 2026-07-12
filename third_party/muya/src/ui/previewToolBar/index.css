@@ -40,6 +40,15 @@
     background: var(--float-hover-color);
 }
 
+.mu-preview-tools li.item.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.mu-preview-tools li.item.disabled:hover {
+    background: transparent;
+}
+
 .mu-preview-tools li.item:last-of-type {
     margin-left: 6px;
 }

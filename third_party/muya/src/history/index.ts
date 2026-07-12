@@ -109,6 +109,11 @@ class History {
     private _lastInputKind: Nullable<TInputKind> = null;
     private _ignoreChange: boolean = false;
     private _selectionStack: (Nullable<IHistorySelection>)[] = [];
+    // Latest caret/range observed on `selection-change` before the next edit.
+    // Quill-style `_selectionStack` lag leaves the *first* undo entry with a
+    // null selection; without this seed, undo rewrites the DOM and the browser
+    // caret collapses to offset 0 (line start).
+    private _beforeEditSelection: Nullable<IHistorySelection> = null;
     private _stack: IStack = {
         undo: [],
         redo: [],
@@ -123,6 +128,12 @@ class History {
     }
 
     private _listen() {
+        this._muya.eventCenter.on('selection-change', () => {
+            if (this._ignoreChange)
+                return;
+            this._beforeEditSelection = this._selection.getSelection();
+        });
+
         this._muya.eventCenter.on(
             'json-change',
             ({
@@ -187,6 +198,7 @@ class History {
     clear() {
         this._stack = { undo: [], redo: [] };
         this._selectionStack = [];
+        this._beforeEditSelection = null;
         this._lastRecorded = 0;
         this._ignoreChange = false;
     }
@@ -286,12 +298,20 @@ class History {
     }
 
     private _getLastSelection() {
-        this._selectionStack.push(this._selection.getSelection());
+        const current = this._selection.getSelection();
+        this._selectionStack.push(current);
 
         if (this._selectionStack.length > 2)
             this._selectionStack.shift();
 
-        return this._selectionStack.length === 2 ? this._selectionStack[0] : null;
+        // Prefer the lagged (pre-this-edit) snapshot once we have two samples.
+        if (this._selectionStack.length === 2)
+            return this._selectionStack[0];
+
+        // First recorded change: fall back to the caret from the last
+        // selection-change, then to the live selection, so undo still restores
+        // a caret instead of leaving the browser at offset 0.
+        return this._beforeEditSelection ?? current;
     }
 
     private _record(op: JSONOpList, doc: TState[]) {

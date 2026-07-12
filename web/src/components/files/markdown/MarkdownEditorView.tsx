@@ -52,6 +52,8 @@ type Props = {
   projectID: string;
   markdownPath: string;
   hidden?: boolean;
+  /** When false, ignore markdown prop updates (avoids setContent clearing undo during dirty autosave races). */
+  syncExternalContent?: boolean;
   onChange?: () => void;
   onTocChange?: (toc: TocItem[]) => void;
   onOpenPath?: (path: string, fragment?: string) => void;
@@ -170,6 +172,7 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
     projectID,
     markdownPath,
     hidden = false,
+    syncExternalContent = true,
     onChange,
     onTocChange,
     onOpenPath,
@@ -466,7 +469,14 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
   }, [projectID, markdownPath]);
 
   // Sync external draft reloads (discard / remote poll) into Muya.
+  // Gate with a ref so flipping dirty→clean alone does not re-run setContent
+  // (setContent clears Muya's undo/redo stack). Only markdown identity changes
+  // while sync is allowed should rewrite the editor.
+  const syncExternalContentRef = useRef(syncExternalContent);
+  syncExternalContentRef.current = syncExternalContent;
+
   useEffect(() => {
+    if (!syncExternalContentRef.current) return;
     const muya = muyaRef.current;
     if (!muya) return;
     const current = muya.getMarkdown();

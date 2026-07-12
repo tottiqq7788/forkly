@@ -55,3 +55,41 @@ Forkly can scope styles and z-index without targeting bare `body` children.
 - Global `html, body` typography rules are limited to `.mu-editor, .mu-portal`.
 - Global `::selection` rules are limited to descendants of
   `.mu-editor` / `.mu-portal`.
+
+## 6. Undo restores caret on the first history entry
+
+**File:** `src/history/index.ts`
+
+Upstream History uses a Quill-style two-slot selection lag (`_selectionStack`).
+The first recorded undo entry therefore stores `selection: null`, so
+`updateContents` skips caret restore and the browser caret collapses to offset
+0 after the DOM rewrite.
+
+- Listen to `selection-change` (when not ignoring) and keep `_beforeEditSelection`.
+- When `_getLastSelection` has no lagged snapshot yet, fall back to that seed
+  (then to the live selection) instead of returning `null`.
+
+## 7. Diagram hover toolbar (source/preview toggle + PNG export)
+
+**Files:**
+- `src/block/extra/diagram/diagramPreview.ts`
+- `src/assets/styles/blockSyntax.css`
+- `src/ui/previewToolBar/{index.ts,config.ts,index.css}`
+- `src/utils/exportSvgPng.ts`
+- `src/locales/{en,zh-CN,zh-TW}.ts`
+
+Upstream MarkText enters diagram source mode on preview click, then floats the
+still-visible preview under the source with `position:absolute; z-index:10000`,
+covering subsequent content.
+
+Forkly changes:
+- Active diagram blocks hide the preview (`display:none`) instead of floating it;
+  source and preview are mutually exclusive in document flow. Preview click still
+  enters source mode (touch-friendly), now without the overlay bug.
+- `PreviewToolBar` also targets `diagram` blocks: hover shows a top-placed
+  toolbar with source/preview toggle + Export PNG. Delayed hide + float
+  `mouseenter` keeps the bar stable while moving onto the portal; `destroy`
+  clears the hide timer.
+- `downloadDiagramPreviewAsPng` rasterizes the preview SVG onto a canvas with
+  `--editor-bg-color`, rejects zero-size / cross-origin `<img>` exports, and
+  caps canvas dimensions to avoid OOMs.

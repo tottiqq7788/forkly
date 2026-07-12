@@ -161,6 +161,8 @@ class DiagramPreview extends Parent {
         if (this.parent == null)
             return;
 
+        // Enter source mode. Safe now that active diagrams hide the preview in
+        // document flow (instead of floating it over subsequent content).
         const cursorBlock = this.parent.firstContentInDescendant();
         cursorBlock?.setCursor(0, 0);
     }

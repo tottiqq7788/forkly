@@ -254,6 +254,24 @@ function MarkdownEditorWorkspace({
       if (mod && e.key.toLowerCase() === "f") {
         e.preventDefault();
         openFind();
+        return;
+      }
+      // Muya does not bind undo/redo itself (MarkText wires these in Electron).
+      // contenteditable native undo is useless after Muya rewrites the DOM.
+      if (mod && e.key.toLowerCase() === "z") {
+        const t = e.target;
+        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+        e.preventDefault();
+        if (e.shiftKey) editorRef.current?.redo();
+        else editorRef.current?.undo();
+        return;
+      }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "y") {
+        const t = e.target;
+        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+        e.preventDefault();
+        editorRef.current?.redo();
+        return;
       }
       if (e.key === "Escape" && findOpen) {
         closeFind();
@@ -354,9 +372,17 @@ function MarkdownEditorWorkspace({
   function handleCommand(cmd: FormatCommand) {
     const ed = editorRef.current;
     if (!ed) return;
-    if (cmd === "undo") ed.undo();
-    else if (cmd === "redo") ed.redo();
-    else if (cmd === "find:open") {
+    // undo/redo restore their own caret via History; a trailing focus() can
+    // collapse the selection to the start of the block after DOM rewrite.
+    if (cmd === "undo") {
+      ed.undo();
+      return;
+    }
+    if (cmd === "redo") {
+      ed.redo();
+      return;
+    }
+    if (cmd === "find:open") {
       if (findOpen) closeFind();
       else openFind();
       return;
@@ -597,6 +623,7 @@ function MarkdownEditorWorkspace({
                 key={editorKey}
                 ref={editorRef}
                 markdown={draftMarkdown}
+                syncExternalContent={saveStatus === "clean"}
                 projectID={projectID}
                 markdownPath={file.path}
                 onChange={() => setDraftFromEditor()}

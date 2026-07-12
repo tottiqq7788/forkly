@@ -10,7 +10,7 @@ describe("MarkdownCategoryToolbar", () => {
     render(<MarkdownCategoryToolbar onCommand={onCommand} />);
 
     expect(screen.getByRole("button", { name: "标题样式" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "历史操作" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "追溯操作" })).toBeInTheDocument();
 
     await user.hover(screen.getByRole("button", { name: "标题样式" }));
     expect(await screen.findByRole("menuitem", { name: "标题 1" })).toBeInTheDocument();

@@ -7,6 +7,8 @@ import { MarkdownSaveGuardProvider } from "../components/files/markdown/Markdown
 const fetchSessionMe = vi.fn();
 const fetchFileContent = vi.fn();
 const apiMock = vi.fn();
+const editorUndo = vi.fn();
+const editorRedo = vi.fn();
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -35,8 +37,8 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
       getMarkdown: () => "# Hello",
       format: () => undefined,
       updateParagraph: () => undefined,
-      undo: () => undefined,
-      redo: () => undefined,
+      undo: (...args: unknown[]) => editorUndo(...args),
+      redo: (...args: unknown[]) => editorRedo(...args),
       search: () => ({ matches: [], index: -1 }),
       find: () => ({ matches: [], index: -1 }),
       replace: () => ({ matches: [], index: -1 }),
@@ -84,6 +86,8 @@ describe("MarkdownEditorPage", () => {
     fetchSessionMe.mockReset();
     fetchFileContent.mockReset();
     apiMock.mockReset();
+    editorUndo.mockReset();
+    editorRedo.mockReset();
     fetchSessionMe.mockResolvedValue({ user: "dev" });
     apiMock.mockResolvedValue({ id: "p1", name: "demo" });
   });
@@ -127,5 +131,29 @@ describe("MarkdownEditorPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Hello" })).toBeInTheDocument();
     });
+  });
+
+  it("routes mod+z / mod+shift+z / mod+y to editor undo and redo", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true }));
+    expect(editorUndo).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true }),
+    );
+    expect(editorRedo).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, bubbles: true }));
+    expect(editorRedo).toHaveBeenCalledTimes(2);
   });
 });
