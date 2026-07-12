@@ -1,7 +1,7 @@
 import CodeIcon from '../../assets/icons/code/2.png';
 import DeleteIcon from '../../assets/icons/delete/2.png';
 import EditIcon from '../../assets/icons/edit.png';
-import ChartIcon from '../../assets/icons/chart/2.png';
+import LineChartIcon from '../../assets/icons/line_chart/2.png';
 import ImageIcon from '../../assets/icons/format_image/2.png';
 
 export type PreviewToolIcon = {
@@ -34,7 +34,7 @@ export const DIAGRAM_SOURCE_ICON: PreviewToolIcon = {
 export const DIAGRAM_PREVIEW_ICON: PreviewToolIcon = {
     type: 'toggle',
     tooltip: 'View Diagram',
-    icon: ChartIcon,
+    icon: LineChartIcon,
 };
 
 export const DIAGRAM_EXPORT_ICON: PreviewToolIcon = {

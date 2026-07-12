@@ -111,6 +111,10 @@ export class PreviewToolBar extends BaseFloat {
         return !!block && block.blockName === 'diagram';
     }
 
+    private _isDiagramShowingSource(block: DiagramBlock): boolean {
+        return block.active || !!block.domNode?.classList.contains('mu-active');
+    }
+
     private _diagramPreviewEl(block: DiagramBlock): HTMLElement | null {
         const preview = block.attachments?.head;
         return (preview?.domNode as HTMLElement | undefined) ?? null;
@@ -120,7 +124,9 @@ export class PreviewToolBar extends BaseFloat {
         if (!this._isDiagram(block))
             return PREVIEW_ICONS;
 
-        const toggle = block.active ? DIAGRAM_PREVIEW_ICON : DIAGRAM_SOURCE_ICON;
+        const toggle = this._isDiagramShowingSource(block)
+            ? DIAGRAM_PREVIEW_ICON
+            : DIAGRAM_SOURCE_ICON;
         return [toggle, DIAGRAM_EXPORT_ICON];
     }
 
@@ -139,9 +145,47 @@ export class PreviewToolBar extends BaseFloat {
         block.active = false;
     }
 
+    /**
+     * Reveal the source container before focusing. While inactive the container
+     * is CSS-collapsed to 0×0; focusing that contenteditable often no-ops after
+     * the first toggle, which looks like the toolbar button "stopped working".
+     */
+    private _activateDiagram(block: DiagramBlock) {
+        const content = block.firstContentInDescendant();
+        block.active = true;
+        for (const ancestor of content?.getAncestors() ?? [])
+            ancestor.active = true;
+        // Force layout so the contenteditable is focusable before setCursor.
+        void block.domNode?.offsetWidth;
+        content?.setCursor(0, 0);
+    }
+
+    private _keepToolbarFor(block: PreviewBlock) {
+        this._cancelHide();
+        this._block = block;
+        this._applyPlacement(block);
+        // Wait a frame so focus/blur `.mu-active` updates land before we re-read
+        // them for the toggle icon label.
+        requestAnimationFrame(() => {
+            if (this._block !== block || !block.domNode)
+                return;
+            this.show(block.domNode);
+            this.render();
+        });
+    }
+
     override listen() {
         const { eventCenter } = this.muya;
         super.listen();
+
+        // Prevent mousedown on the toolbar from blurring an open diagram source
+        // editor. Without this, blur clears `.mu-active` before `click`, so the
+        // toggle handler mis-detects preview mode and immediately re-enters
+        // source — making further clicks appear broken.
+        eventCenter.attachDOMEvent(this.floatBox!, 'mousedown', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
 
         const handler = throttle((event: Event) => {
             if (!isMouseEvent(event))
@@ -288,16 +332,13 @@ export class PreviewToolBar extends BaseFloat {
                 if (!this._isDiagram(block))
                     break;
 
-                if (block.active) {
+                if (this._isDiagramShowingSource(block))
                     this._deactivateDiagram(block);
-                    this._applyPlacement(block);
-                    this.show(block.domNode!);
-                    this.render();
-                    return;
-                }
+                else
+                    this._activateDiagram(block);
 
-                cursorBlock = block.firstContentInDescendant();
-                break;
+                this._keepToolbarFor(block);
+                return;
             }
 
             case 'export': {
@@ -316,20 +357,6 @@ export class PreviewToolBar extends BaseFloat {
 
         if (cursorBlock)
             cursorBlock.setCursor(0, 0);
-
-        // After entering source mode, keep the toolbar for diagram so the user
-        // can toggle back; html/math hide as before.
-        if (this._isDiagram(block)) {
-            this._applyPlacement(block);
-            // Defer show/render until `.mu-active` has been applied by focus.
-            requestAnimationFrame(() => {
-                if (this._block !== block)
-                    return;
-                this.show(block.domNode!);
-                this.render();
-            });
-            return;
-        }
 
         this.hide();
     }

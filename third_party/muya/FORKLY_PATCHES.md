@@ -83,13 +83,15 @@ still-visible preview under the source with `position:absolute; z-index:10000`,
 covering subsequent content.
 
 Forkly changes:
+- Preview click does not enter source mode (source editing is toolbar-only).
 - Active diagram blocks hide the preview (`display:none`) instead of floating it;
-  source and preview are mutually exclusive in document flow. Preview click still
-  enters source mode (touch-friendly), now without the overlay bug.
+  source and preview are mutually exclusive in document flow.
 - `PreviewToolBar` also targets `diagram` blocks: hover shows a top-placed
   toolbar with source/preview toggle + Export PNG. Delayed hide + float
   `mouseenter` keeps the bar stable while moving onto the portal; `destroy`
-  clears the hide timer.
+  clears the hide timer. Toolbar `mousedown` is cancelled so toggling does not
+  blur-then-reenter source mode. Entering source activates the block (expands the
+  0×0 source container) before focusing, so the 2nd/3rd toggle keeps working.
 - `downloadDiagramPreviewAsPng` rasterizes the preview SVG onto a canvas with
   `--editor-bg-color`, rejects zero-size / cross-origin `<img>` exports, and
   caps canvas dimensions to avoid OOMs.

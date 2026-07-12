@@ -110,6 +110,110 @@ describe('PreviewToolBar — diagram hover tools', () => {
         expect(toolbar.status).toBe(true);
     });
 
+    it('toggle selectItem exits source without re-entering when active is cleared mid-click', () => {
+        const muya = bootMuya('```mermaid\ngraph TD; A-->B\n```\n');
+        const toolbar = makeToolbar(muya);
+        const figure = muya.domNode.querySelector('figure.mu-diagram-block') as HTMLElement;
+        const setCursor = vi.fn();
+        const content = { setCursor, domNode: document.createElement('span'), getAncestors: () => [] };
+        const block = {
+            blockName: 'diagram',
+            active: true,
+            domNode: figure,
+            attachments: { head: { domNode: figure.querySelector('.mu-diagram-preview') } },
+            firstContentInDescendant: () => content,
+        };
+        figure.classList.add('mu-active');
+
+        // @ts-expect-error — private
+        toolbar._block = block;
+        toolbar.show(figure);
+        toolbar.render();
+
+        // Simulate the old failure mode: mousedown would blur and clear active
+        // before click. With mousedown preventDefault on the float, active stays
+        // true so toggle correctly exits to preview.
+        const toggle = toolbar.container!.querySelector('li.item.toggle') as HTMLElement;
+        const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+        toggle.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+
+        // @ts-expect-error — private selectItem
+        toolbar.selectItem(new MouseEvent('click', { bubbles: true, cancelable: true }), {
+            type: 'toggle',
+            tooltip: 'View Diagram',
+            icon: '',
+        });
+
+        expect(block.active).toBe(false);
+        expect(setCursor).not.toHaveBeenCalled();
+    });
+
+    it('toggle selectItem reveals source (active) before focusing content', () => {
+        const muya = bootMuya('```mermaid\ngraph TD; A-->B\n```\n');
+        const toolbar = makeToolbar(muya);
+        const figure = muya.domNode.querySelector('figure.mu-diagram-block') as HTMLElement;
+        const setCursor = vi.fn();
+        const content = {
+            setCursor,
+            domNode: document.createElement('span'),
+            getAncestors: () => [] as { active: boolean }[],
+        };
+        const block = {
+            blockName: 'diagram',
+            active: false,
+            domNode: figure,
+            attachments: { head: { domNode: figure.querySelector('.mu-diagram-preview') } },
+            firstContentInDescendant: () => content,
+        };
+
+        // @ts-expect-error — private
+        toolbar._block = block;
+        toolbar.show(figure);
+
+        // @ts-expect-error — private
+        toolbar.selectItem(new MouseEvent('click', { bubbles: true, cancelable: true }), {
+            type: 'toggle',
+            tooltip: 'View Source',
+            icon: '',
+        });
+
+        // Source container must be activated before setCursor so a 0×0
+        // contenteditable can receive focus on the 2nd/3rd toggle.
+        expect(block.active).toBe(true);
+        expect(setCursor).toHaveBeenCalledWith(0, 0);
+    });
+
+    it('toggle selectItem enters source when showing preview', () => {
+        const muya = bootMuya('```mermaid\ngraph TD; A-->B\n```\n');
+        const toolbar = makeToolbar(muya);
+        const figure = muya.domNode.querySelector('figure.mu-diagram-block') as HTMLElement;
+        const setCursor = vi.fn();
+        const content = { setCursor, domNode: document.createElement('span'), getAncestors: () => [] };
+        const block = {
+            blockName: 'diagram',
+            active: false,
+            domNode: figure,
+            attachments: { head: { domNode: figure.querySelector('.mu-diagram-preview') } },
+            firstContentInDescendant: () => content,
+        };
+
+        // @ts-expect-error — private
+        toolbar._block = block;
+        toolbar.show(figure);
+        toolbar.render();
+
+        // @ts-expect-error — private
+        toolbar.selectItem(new MouseEvent('click', { bubbles: true, cancelable: true }), {
+            type: 'toggle',
+            tooltip: 'View Source',
+            icon: '',
+        });
+
+        expect(setCursor).toHaveBeenCalledWith(0, 0);
+        expect(block.active).toBe(true);
+    });
+
     it('still exposes edit + delete for math blocks', () => {
         const muya = bootMuya('$$\nx = 1\n$$\n');
         const toolbar = makeToolbar(muya);
