@@ -102,6 +102,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  line-height: 0;
+}
+
+.forkly-md-save-status [role="status"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .forkly-md-save-status[data-status="dirty"],

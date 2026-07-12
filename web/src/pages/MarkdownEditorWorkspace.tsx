@@ -1,10 +1,11 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { X } from "@phosphor-icons/react";
+import { CheckCircle, Circle, CircleNotch, WarningCircle, X, XCircle } from "@phosphor-icons/react";
 import type { FileContent } from "../api";
 import {
   MarkdownEditorView,
@@ -36,13 +37,72 @@ const TOC_NAV_LOCK_MS = 2000;
 const SCROLL_RESTORE_WATCH_MS = 4000;
 const EDITOR_ROOT_SELECTOR = ".forkly-markdown-editor";
 
-const STATUS_LABEL: Record<string, string> = {
+const SAVE_STATUS_LABEL: Record<string, string> = {
   clean: "已保存",
   dirty: "未保存",
   saving: "保存中…",
   conflict: "冲突",
   error: "保存失败",
 };
+
+function SaveStatusIcon({ status }: { status: string }) {
+  const size = 16;
+  switch (status) {
+    case "clean":
+      return <CheckCircle size={size} weight="fill" aria-hidden />;
+    case "dirty":
+      return <Circle size={size} weight="fill" aria-hidden />;
+    case "saving":
+      return <CircleNotch size={size} className="animate-spin" aria-hidden />;
+    case "conflict":
+      return <WarningCircle size={size} weight="fill" aria-hidden />;
+    case "error":
+      return <XCircle size={size} weight="fill" aria-hidden />;
+    default:
+      return null;
+  }
+}
+
+/** Split a filesystem/repo path into non-empty segments. */
+function pathSegments(path: string): string[] {
+  return path.replace(/\\/g, "/").split("/").filter(Boolean);
+}
+
+/** Render path with spaces around every `/`, e.g. `a / b / c.md` or `/ Users / me / a.md`. */
+function EditorPathBreadcrumb({
+  path,
+  absolute = false,
+  leadingLabel,
+}: {
+  path: string;
+  absolute?: boolean;
+  /** Shown first in muted color (project name). */
+  leadingLabel?: string;
+}) {
+  const parts = pathSegments(path);
+  return (
+    <>
+      {absolute ? <span>/</span> : null}
+      {leadingLabel ? (
+        <span className="text-[var(--color-text-tertiary)]">{leadingLabel}</span>
+      ) : null}
+      {parts.map((part, index) => {
+        const sep =
+          absolute && !leadingLabel && index === 0
+            ? " "
+            : leadingLabel || index > 0 || absolute
+              ? " / "
+              : "";
+        return (
+          <Fragment key={`${index}-${part}`}>
+            {sep ? <span>{sep}</span> : null}
+            <span>{part}</span>
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
 
 function isFormField(target: EventTarget | null): boolean {
   return (
@@ -600,14 +660,19 @@ export function MarkdownEditorWorkspace({
     <div className="forkly-md-editor-page">
       <header className="forkly-md-editor-topbar">
         <div className="forkly-md-editor-path" title={transport.absPathTooltip || transport.displayPath}>
-          <span className="text-[var(--color-text-tertiary)]">{transport.displayLabel}</span>
-          <span className="text-[var(--color-text-tertiary)]"> / </span>
-          <span>{transport.displayPath}</span>
+          {transport.scopeKey.startsWith("local:") ? (
+            <EditorPathBreadcrumb path={transport.displayPath} absolute={transport.displayPath.startsWith("/")} />
+          ) : (
+            <EditorPathBreadcrumb path={transport.displayPath} leadingLabel={transport.displayLabel} />
+          )}
         </div>
-        <div className="forkly-md-save-status" data-status={saveStatus}>
-          <span>
-            {STATUS_LABEL[saveStatus] ?? ""}
-            {lastError ? ` · ${lastError}` : ""}
+        <div
+          className="forkly-md-save-status"
+          data-status={saveStatus}
+          title={[SAVE_STATUS_LABEL[saveStatus], lastError].filter(Boolean).join(" · ")}
+        >
+          <span role="status" aria-label={SAVE_STATUS_LABEL[saveStatus] ?? saveStatus}>
+            <SaveStatusIcon status={saveStatus} />
           </span>
           {(saveStatus === "error" || saveStatus === "dirty") && (
             <button type="button" onClick={() => void retry()}>

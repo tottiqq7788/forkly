@@ -402,8 +402,8 @@ export function MarkdownCategoryToolbar({
           <button
             type="button"
             className={`forkly-md-category-btn ${shortcutsOpen ? "is-open" : ""}`}
-            title="键盘快捷键"
-            aria-label="键盘快捷键"
+            title="快捷键"
+            aria-label="快捷键"
             aria-pressed={shortcutsOpen}
             onClick={() => {
               setOpenId(null);
@@ -413,13 +413,13 @@ export function MarkdownCategoryToolbar({
             <span className="forkly-md-tool-icon">
               <Keyboard size={18} />
             </span>
-            <span className="forkly-md-tool-label">键盘</span>
+            <span className="forkly-md-tool-label">快捷键</span>
           </button>
         </div>
       </div>
 
       {shortcutsOpen ? (
-        <Drawer title="键盘快捷键" width={520} onClose={() => setShortcutsOpen(false)}>
+        <Drawer title="快捷键" width={520} onClose={() => setShortcutsOpen(false)}>
           <MarkdownShortcutsPanel />
         </Drawer>
       ) : null}

@@ -100,8 +100,8 @@ describe("documentTransport", () => {
 
     expect(transport.scopeKey).toBe("local:lf1");
     expect(transport.remountKey).toBe("local:lf1:note.md");
-    expect(transport.displayLabel).toBe("本地文件");
-    expect(transport.displayPath).toBe("Notes/note.md");
+    expect(transport.displayLabel).toBe("");
+    expect(transport.displayPath).toBe("/Users/me/Notes/note.md");
     expect(transport.absPathTooltip).toBe("/Users/me/Notes/note.md");
     expect(transport.assetURL("images/img.png")).toBe(
       "/local-api/v1/local-files/lf1/asset?path=images%2Fimg.png",

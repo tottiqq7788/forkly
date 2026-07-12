@@ -75,16 +75,17 @@ export function createLocalDocumentTransport(args: {
   file: LocalFileContent;
 }): DocumentTransport {
   const { fileId, file } = args;
-  const displayPath = localDisplayPath(file);
+  const absPath = file.absPath?.trim() || "";
+  const displayPath = absPath || localDisplayPath(file);
   const markdownPath = localMarkdownPath(file);
   const titleName = file.name || basename(displayPath);
   return {
     scopeKey: `local:${fileId}`,
     remountKey: `local:${fileId}:${markdownPath}`,
-    displayLabel: "本地文件",
+    displayLabel: "",
     displayPath,
     titleName,
-    absPathTooltip: file.absPath || undefined,
+    absPathTooltip: absPath || undefined,
     markdownPath,
     load: (opts) => fetchLocalFileContent(fileId, opts),
     save: (content, revision) => putLocalFileContent(fileId, { content, revision }),

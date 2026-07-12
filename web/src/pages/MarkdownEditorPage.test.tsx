@@ -177,12 +177,15 @@ describe("MarkdownEditorPage", () => {
     });
     renderAt("/projects/p1/editor?path=docs%2Fa.md");
     expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
-    expect(screen.getByText("docs/a.md")).toBeInTheDocument();
+    expect(screen.getByText("demo")).toBeInTheDocument();
+    expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(screen.getByText("a.md")).toBeInTheDocument();
     expect(screen.getByRole("toolbar", { name: "Markdown 格式" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "标题目录" })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Hello" })).toBeInTheDocument();
     });
+    expect(document.querySelector(".forkly-md-editor-path")?.textContent).toBe("demo / docs / a.md");
   });
 
   it("routes mod+z / mod+shift+z / mod+y to editor undo and redo", async () => {
@@ -311,13 +314,10 @@ describe("MarkdownEditorPage", () => {
     renderLocalAt("/editor/local/lf1");
 
     expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
-    expect(screen.getByText("本地文件")).toBeInTheDocument();
-    const displayPath = screen.getByText("Notes/note.md");
-    expect(displayPath).toBeInTheDocument();
-    expect(displayPath.closest(".forkly-md-editor-path")).toHaveAttribute(
-      "title",
-      "/Users/me/Notes/note.md",
-    );
+    expect(screen.queryByText("本地文件")).not.toBeInTheDocument();
+    const pathEl = document.querySelector(".forkly-md-editor-path");
+    expect(pathEl?.textContent).toBe("/ Users / me / Notes / note.md");
+    expect(pathEl).toHaveAttribute("title", "/Users/me/Notes/note.md");
     expect(document.title).toBe("note.md · Forkly");
   });
 
