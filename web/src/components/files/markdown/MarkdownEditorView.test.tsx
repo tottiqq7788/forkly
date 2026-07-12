@@ -1,10 +1,16 @@
-import { StrictMode } from "react";
+import { createRef, StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
+import type { MarkdownEditorHandle } from "./MarkdownEditorView";
 
 vi.mock("@muyajs/core", () => {
   class FakeMuya {
-    constructor(_el: HTMLElement, _options: Record<string, unknown>) {}
+    domNode: HTMLElement;
+
+    constructor(el: HTMLElement, _options: Record<string, unknown>) {
+      this.domNode = el;
+    }
+
     init() {}
     destroy() {}
     hideAllFloatTools() {}
@@ -20,22 +26,27 @@ vi.mock("@muyajs/core", () => {
     getMarkdown() {
       return "# hello";
     }
-    get domNode() {
-      return document.createElement("div");
-    }
     setContent() {}
     format() {}
     updateParagraph() {}
     undo() {}
     redo() {}
-    search() {
-      return { matches: [], index: -1 };
+    setActiveSearchMatch() {
+      this.domNode.innerHTML = '<span class="mu-highlight">hello</span>';
+      return { matches: [{ block: { domNode: this.domNode }, start: 0, end: 5 }], index: 0 };
+    }
+    search(value: string) {
+      if (!value) {
+        this.domNode.innerHTML = "";
+        return { matches: [], index: -1 };
+      }
+      return this.setActiveSearchMatch();
     }
     find() {
-      return { matches: [], index: -1 };
+      return this.setActiveSearchMatch();
     }
     replace() {
-      return { matches: [], index: -1 };
+      return this.setActiveSearchMatch();
     }
     focus() {}
   }
@@ -85,5 +96,43 @@ describe("MarkdownEditorView", () => {
 
     unmount();
     expect(container.querySelector(".forkly-muya-mount")).toBeNull();
+  });
+
+  it("scrolls the active search match after search navigation and replace", async () => {
+    const ref = createRef<MarkdownEditorHandle>();
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      render(<MarkdownEditorView ref={ref} markdown="# hello" projectID="p1" markdownPath="a.md" />);
+
+      await waitFor(() => {
+        expect(ref.current).toBeTruthy();
+      });
+
+      ref.current?.search("hello");
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "center",
+          inline: "nearest",
+          behavior: "smooth",
+        });
+      });
+
+      scrollIntoView.mockClear();
+      ref.current?.find("next");
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalled();
+      });
+
+      scrollIntoView.mockClear();
+      ref.current?.replace("hi", { isSingle: true });
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalled();
+      });
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 });

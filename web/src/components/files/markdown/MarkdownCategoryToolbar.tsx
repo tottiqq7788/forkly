@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -17,7 +17,6 @@ import {
   TextH,
   TextItalic,
   TextStrikethrough,
-  TextT,
   CheckSquare,
   Plus,
   ArrowsClockwise,
@@ -68,6 +67,8 @@ type ToolCategory = {
   title: string;
   icon: ReactNode;
   items: ToolItem[];
+  /** When set, the category button fires this command directly (no flyout). */
+  directCommand?: FormatCommand;
 };
 
 type Props = {
@@ -77,9 +78,9 @@ type Props = {
 };
 
 const CLOSE_DELAY_MS = 160;
+const FLYOUT_MAX_ITEMS_PER_ROW = 4;
 
-function buildCategories(findQuery: string): ToolCategory[] {
-  const hasQuery = findQuery.trim().length > 0;
+function buildCategories(): ToolCategory[] {
   return [
     {
       id: "history",
@@ -257,52 +258,28 @@ function buildCategories(findQuery: string): ToolCategory[] {
       label: "查找",
       title: "查找替换",
       icon: <MagnifyingGlass size={18} />,
-      items: [
-        {
-          id: "find-open",
-          label: "打开",
-          title: "打开查找",
-          icon: <MagnifyingGlass size={18} />,
-          command: "find:open",
-        },
-        {
-          id: "find-prev",
-          label: "上一个",
-          title: "上一个匹配",
-          icon: <TextT size={18} />,
-          command: "find:previous",
-          disabled: !hasQuery,
-        },
-        {
-          id: "find-next",
-          label: "下一个",
-          title: "下一个匹配",
-          icon: <TextT size={18} />,
-          command: "find:next",
-          disabled: !hasQuery,
-        },
-        {
-          id: "find-replace",
-          label: "替换",
-          title: "替换当前",
-          icon: <ArrowsClockwise size={18} />,
-          command: "find:replace",
-          disabled: !hasQuery,
-        },
-      ],
+      items: [],
+      directCommand: "find:open",
     },
   ];
+}
+
+function chunkItems(items: ToolItem[]): ToolItem[][] {
+  const rows: ToolItem[][] = [];
+  for (let i = 0; i < items.length; i += FLYOUT_MAX_ITEMS_PER_ROW) {
+    rows.push(items.slice(i, i + FLYOUT_MAX_ITEMS_PER_ROW));
+  }
+  return rows;
 }
 
 export function MarkdownCategoryToolbar({
   onCommand,
   findOpen = false,
-  findQuery = "",
 }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const closeTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const categories = buildCategories(findQuery);
+  const categories = buildCategories();
 
   function clearCloseTimer() {
     if (closeTimer.current != null) {
@@ -337,32 +314,44 @@ export function MarkdownCategoryToolbar({
     };
   }, []);
 
-  useEffect(() => {
-    if (!findOpen && openId === "find") {
-      // keep flyout available while findbar is open only if user wants; no-op
-    }
-  }, [findOpen, openId]);
-
   return (
     <div ref={rootRef} className="forkly-md-category-rail" role="toolbar" aria-label="Markdown 格式">
       {categories.map((category) => {
-        const open = openId === category.id;
+        const isDirect = !!category.directCommand;
+        const open = !isDirect && openId === category.id;
+        const active = isDirect ? findOpen : open;
+        const rows = chunkItems(category.items);
+        const cols = Math.min(Math.max(category.items.length, 1), FLYOUT_MAX_ITEMS_PER_ROW);
         return (
           <div
             key={category.id}
             className="forkly-md-category-wrap"
-            onMouseEnter={() => openCategory(category.id)}
-            onMouseLeave={scheduleClose}
+            onMouseEnter={() => {
+              if (!isDirect) openCategory(category.id);
+            }}
+            onMouseLeave={() => {
+              if (!isDirect) scheduleClose();
+            }}
           >
             <button
               type="button"
-              className={`forkly-md-category-btn ${open ? "is-open" : ""}`}
+              className={`forkly-md-category-btn ${active ? "is-open" : ""}`}
               title={category.title}
               aria-label={category.title}
-              aria-expanded={open}
-              aria-haspopup="true"
-              onFocus={() => openCategory(category.id)}
-              onClick={() => setOpenId(open ? null : category.id)}
+              aria-expanded={isDirect ? undefined : open}
+              aria-haspopup={isDirect ? undefined : "true"}
+              aria-pressed={isDirect ? findOpen : undefined}
+              onFocus={() => {
+                if (!isDirect) openCategory(category.id);
+              }}
+              onClick={() => {
+                if (category.directCommand) {
+                  onCommand(category.directCommand);
+                  setOpenId(null);
+                  return;
+                }
+                setOpenId(open ? null : category.id);
+              }}
             >
               <span className="forkly-md-tool-icon">{category.icon}</span>
               <span className="forkly-md-tool-label">{category.label}</span>
@@ -370,28 +359,33 @@ export function MarkdownCategoryToolbar({
             {open ? (
               <div
                 className="forkly-md-category-flyout"
+                style={{ "--forkly-md-flyout-cols": cols } as CSSProperties}
                 role="menu"
                 aria-label={category.title}
                 onMouseEnter={() => openCategory(category.id)}
                 onMouseLeave={scheduleClose}
               >
-                {category.items.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="menuitem"
-                    className="forkly-md-category-btn"
-                    title={item.title}
-                    aria-label={item.title}
-                    disabled={item.disabled}
-                    onClick={() => {
-                      onCommand(item.command);
-                      if (!item.command.startsWith("find:")) setOpenId(null);
-                    }}
-                  >
-                    <span className="forkly-md-tool-icon">{item.icon}</span>
-                    <span className="forkly-md-tool-label">{item.label}</span>
-                  </button>
+                {rows.map((row, index) => (
+                  <div key={`${category.id}-${index}`} className="forkly-md-category-flyout-row">
+                    {row.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="menuitem"
+                        className="forkly-md-category-btn"
+                        title={item.title}
+                        aria-label={item.title}
+                        disabled={item.disabled}
+                        onClick={() => {
+                          onCommand(item.command);
+                          setOpenId(null);
+                        }}
+                      >
+                        <span className="forkly-md-tool-icon">{item.icon}</span>
+                        <span className="forkly-md-tool-label">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             ) : null}

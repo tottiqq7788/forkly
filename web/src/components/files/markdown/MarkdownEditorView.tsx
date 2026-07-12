@@ -38,6 +38,8 @@ export type SearchOpts = {
   isCaseSensitive?: boolean;
   isWholeWord?: boolean;
   isRegexp?: boolean;
+  selectHighlight?: boolean;
+  highlightIndex?: number;
 };
 
 export type SearchResult = {
@@ -97,6 +99,29 @@ function scrollToHeadingBySlug(muya: MuyaInstance, slug: string): boolean {
 
 const SAFE_UPLOAD_DATA = /^data:image\/(png|jpe?g|gif|webp);base64,/i;
 const EMPTY_SEARCH: SearchResult = { matches: [], index: -1 };
+
+function activeSearchMatchElement(muya: MuyaInstance, result: SearchResult): HTMLElement | null {
+  const active = muya.domNode?.querySelector<HTMLElement>(".mu-highlight");
+  if (active) return active;
+
+  const match = result.matches[result.index] as
+    | { block?: { domNode?: HTMLElement | null } }
+    | undefined;
+  return match?.block?.domNode ?? null;
+}
+
+function scheduleScrollToSearchMatch(muya: MuyaInstance, result: SearchResult) {
+  if (result.index < 0 || !result.matches.length) return;
+  const scroll = () => {
+    const target = activeSearchMatchElement(muya, result);
+    target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+  };
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(scroll);
+  } else {
+    window.setTimeout(scroll, 0);
+  }
+}
 
 function isDarkTheme(): boolean {
   const root = document.documentElement;
@@ -176,9 +201,27 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
     updateParagraph: (type) => muyaRef.current?.updateParagraph(type),
     undo: () => muyaRef.current?.undo(),
     redo: () => muyaRef.current?.redo(),
-    search: (value, opts) => muyaRef.current?.search(value, opts) ?? EMPTY_SEARCH,
-    find: (action) => muyaRef.current?.find(action) ?? EMPTY_SEARCH,
-    replace: (value, opt) => muyaRef.current?.replace(value, opt) ?? EMPTY_SEARCH,
+    search: (value, opts) => {
+      const muya = muyaRef.current;
+      if (!muya) return EMPTY_SEARCH;
+      const result = muya.search(value, opts);
+      if (value) scheduleScrollToSearchMatch(muya, result);
+      return result;
+    },
+    find: (action) => {
+      const muya = muyaRef.current;
+      if (!muya) return EMPTY_SEARCH;
+      const result = muya.find(action);
+      scheduleScrollToSearchMatch(muya, result);
+      return result;
+    },
+    replace: (value, opt) => {
+      const muya = muyaRef.current;
+      if (!muya) return EMPTY_SEARCH;
+      const result = muya.replace(value, opt);
+      scheduleScrollToSearchMatch(muya, result);
+      return result;
+    },
     hideAllFloatTools: () => muyaRef.current?.hideAllFloatTools(),
     focus: () => muyaRef.current?.focus(),
     setContent: (md) => muyaRef.current?.setContent(md),

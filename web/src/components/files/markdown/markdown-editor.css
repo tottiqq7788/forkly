@@ -117,6 +117,38 @@
   align-items: center;
   padding: 6px 0 10px;
   font-size: 12px;
+  transform-origin: top center;
+}
+
+.forkly-md-findbar.is-entering {
+  animation: forkly-md-findbar-in 180ms ease-out both;
+}
+
+.forkly-md-findbar.is-leaving {
+  animation: forkly-md-findbar-out 150ms ease-in both;
+  pointer-events: none;
+}
+
+@keyframes forkly-md-findbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes forkly-md-findbar-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 
 .forkly-md-findbar input[type="text"] {
@@ -140,6 +172,26 @@
 .forkly-md-findbar .forkly-md-find-hint {
   color: var(--color-error-fg);
   width: 100%;
+}
+
+.forkly-md-findbar-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.forkly-md-findbar-close:hover {
+  background: var(--color-canvas-subtle);
+  color: var(--color-text);
 }
 
 .forkly-md-conflict {
@@ -256,7 +308,16 @@
   border-right: 1px solid var(--color-border);
   background: var(--color-canvas-subtle);
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   min-height: 0;
+}
+
+.forkly-md-toc::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
 }
 
 .forkly-md-toc-empty {
@@ -308,20 +369,36 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 .forkly-md-editor-main .forkly-md-findbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
   flex-shrink: 0;
   padding: 8px 16px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-canvas);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .forkly-md-editor-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   padding: 16px 24px 48px;
+}
+
+.forkly-md-editor-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
 }
 
 .forkly-md-editor-scroll .forkly-markdown-editor {
@@ -419,18 +496,26 @@
 .forkly-md-category-flyout {
   position: absolute;
   right: calc(100% + 8px);
-  top: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 63px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
-  min-width: 140px;
-  max-width: 290px;
+  width: calc((var(--forkly-md-flyout-cols) * 63px) + ((var(--forkly-md-flyout-cols) - 1) * 6px) + 16px);
   padding: 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   z-index: 30;
+}
+
+.forkly-md-category-flyout-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
 }
 
 @media (max-width: 960px) {
@@ -458,12 +543,14 @@
     left: 0;
     top: auto;
     bottom: calc(100% + 8px);
+    transform: none;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .forkly-markdown-editor *,
-  .mu-portal * {
+  .mu-portal *,
+  .forkly-md-findbar {
     animation: none !important;
     transition: none !important;
   }

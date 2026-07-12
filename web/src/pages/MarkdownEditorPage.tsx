@@ -9,11 +9,13 @@ import {
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { X } from "@phosphor-icons/react";
 import { api, fetchFileContent, fetchSessionMe, type FileContent, type Project } from "../api";
 import {
   MarkdownEditorView,
   type MarkdownEditorHandle,
   type SearchResult,
+  type SearchOpts,
   type TocItem,
 } from "../components/files/markdown/MarkdownEditorView";
 import { MarkdownCategoryToolbar, type FormatCommand } from "../components/files/markdown/MarkdownCategoryToolbar";
@@ -125,6 +127,8 @@ function MarkdownEditorWorkspace({
   const [editorError, setEditorError] = useState<Error | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const [findOpen, setFindOpen] = useState(false);
+  const [findMounted, setFindMounted] = useState(false);
+  const findInputRef = useRef<HTMLInputElement>(null);
   const [findQuery, setFindQuery] = useState("");
   const [replaceQuery, setReplaceQuery] = useState("");
   const [findCase, setFindCase] = useState(false);
@@ -175,12 +179,16 @@ function MarkdownEditorWorkspace({
   }, [file.path]);
 
   const runSearch = useCallback(
-    (query: string) => {
+    (query: string, opts?: SearchOpts) => {
       if (!editorRef.current) return;
-      if (findRegex) {
+      const isCaseSensitive = opts?.isCaseSensitive ?? findCase;
+      const isWholeWord = opts?.isWholeWord ?? findWord;
+      const isRegexp = opts?.isRegexp ?? findRegex;
+      if (isRegexp && query) {
         try {
           void new RegExp(query);
         } catch {
+          editorRef.current.search("");
           setFindInfo({ count: 0, index: -1, error: "无效的正则表达式" });
           return;
         }
@@ -191,9 +199,9 @@ function MarkdownEditorWorkspace({
         return;
       }
       const result = editorRef.current.search(query, {
-        isCaseSensitive: findCase,
-        isWholeWord: findWord,
-        isRegexp: findRegex,
+        isCaseSensitive,
+        isWholeWord,
+        isRegexp,
       });
       applySearchResult(result);
     },
@@ -205,6 +213,30 @@ function MarkdownEditorWorkspace({
     setFindInfo({ count: matches.length, index: result.index, error: undefined });
   }
 
+  function openFind() {
+    setFindMounted(true);
+    setFindOpen(true);
+  }
+
+  function closeFind() {
+    if (!findOpen && !findMounted) return;
+    setFindOpen(false);
+    editorRef.current?.search("", { selectHighlight: true });
+    editorRef.current?.focus();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setFindMounted(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!findOpen || !findMounted) return;
+    const id = window.requestAnimationFrame(() => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [findOpen, findMounted]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -215,12 +247,10 @@ function MarkdownEditorWorkspace({
       }
       if (mod && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        setFindOpen(true);
+        openFind();
       }
       if (e.key === "Escape" && findOpen) {
-        setFindOpen(false);
-        editorRef.current?.search("");
-        editorRef.current?.focus();
+        closeFind();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -267,17 +297,20 @@ function MarkdownEditorWorkspace({
     if (!ed) return;
     if (cmd === "undo") ed.undo();
     else if (cmd === "redo") ed.redo();
-    else if (cmd === "find:open") setFindOpen(true);
-    else if (cmd === "find:previous") {
-      setFindOpen(true);
+    else if (cmd === "find:open") {
+      if (findOpen) closeFind();
+      else openFind();
+      return;
+    } else if (cmd === "find:previous") {
+      openFind();
       const r = ed.find("previous");
       applySearchResult(r);
     } else if (cmd === "find:next") {
-      setFindOpen(true);
+      openFind();
       const r = ed.find("next");
       applySearchResult(r);
     } else if (cmd === "find:replace") {
-      setFindOpen(true);
+      openFind();
       const r = ed.replace(replaceQuery, { isSingle: true, isRegexp: findRegex });
       applySearchResult(r);
       setDraftFromEditor();
@@ -369,13 +402,20 @@ function MarkdownEditorWorkspace({
         />
 
         <section className="forkly-md-editor-main">
-          {findOpen ? (
-            <div className="forkly-md-findbar">
+          {findMounted ? (
+            <div
+              className={`forkly-md-findbar ${findOpen ? "is-entering" : "is-leaving"}`}
+              onAnimationEnd={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.animationName !== "forkly-md-findbar-out") return;
+                if (!findOpen) setFindMounted(false);
+              }}
+            >
               <input
+                ref={findInputRef}
                 type="text"
                 placeholder="查找"
                 value={findQuery}
-                autoFocus
                 onChange={(e) => {
                   setFindQuery(e.target.value);
                   runSearch(e.target.value);
@@ -443,8 +483,9 @@ function MarkdownEditorWorkspace({
                   type="checkbox"
                   checked={findCase}
                   onChange={(e) => {
-                    setFindCase(e.target.checked);
-                    setTimeout(() => runSearch(findQuery), 0);
+                    const next = e.target.checked;
+                    setFindCase(next);
+                    runSearch(findQuery, { isCaseSensitive: next });
                   }}
                 />
                 大小写
@@ -454,8 +495,9 @@ function MarkdownEditorWorkspace({
                   type="checkbox"
                   checked={findWord}
                   onChange={(e) => {
-                    setFindWord(e.target.checked);
-                    setTimeout(() => runSearch(findQuery), 0);
+                    const next = e.target.checked;
+                    setFindWord(next);
+                    runSearch(findQuery, { isWholeWord: next });
                   }}
                 />
                 全词
@@ -465,8 +507,9 @@ function MarkdownEditorWorkspace({
                   type="checkbox"
                   checked={findRegex}
                   onChange={(e) => {
-                    setFindRegex(e.target.checked);
-                    setTimeout(() => runSearch(findQuery), 0);
+                    const next = e.target.checked;
+                    setFindRegex(next);
+                    runSearch(findQuery, { isRegexp: next });
                   }}
                 />
                 正则
@@ -476,13 +519,12 @@ function MarkdownEditorWorkspace({
               </span>
               <button
                 type="button"
-                onClick={() => {
-                  setFindOpen(false);
-                  editorRef.current?.search("");
-                  editorRef.current?.focus();
-                }}
+                className="forkly-md-findbar-close"
+                title="关闭"
+                aria-label="关闭"
+                onClick={closeFind}
               >
-                关闭
+                <X size={14} weight="bold" aria-hidden />
               </button>
               {findInfo.error ? <div className="forkly-md-find-hint">{findInfo.error}</div> : null}
             </div>

@@ -18,16 +18,17 @@ describe("MarkdownCategoryToolbar", () => {
     expect(onCommand).toHaveBeenCalledWith("para:heading 2");
   });
 
-  it("disables find next until a query exists", async () => {
+  it("opens findbar directly from the find category without a flyout", async () => {
+    const onCommand = vi.fn();
     const user = userEvent.setup();
-    const { rerender } = render(
-      <MarkdownCategoryToolbar onCommand={vi.fn()} findQuery="" />,
-    );
-    await user.hover(screen.getByRole("button", { name: "查找替换" }));
-    expect(await screen.findByRole("menuitem", { name: "下一个匹配" })).toBeDisabled();
+    render(<MarkdownCategoryToolbar onCommand={onCommand} findOpen={false} />);
 
-    rerender(<MarkdownCategoryToolbar onCommand={vi.fn()} findQuery="hello" />);
-    await user.hover(screen.getByRole("button", { name: "查找替换" }));
-    expect(await screen.findByRole("menuitem", { name: "下一个匹配" })).not.toBeDisabled();
+    const findBtn = screen.getByRole("button", { name: "查找替换" });
+    await user.hover(findBtn);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    await user.click(findBtn);
+    expect(onCommand).toHaveBeenCalledWith("find:open");
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });
