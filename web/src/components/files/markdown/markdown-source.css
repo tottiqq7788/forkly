@@ -1,3 +1,6 @@
+/* Source mode: document grows with content; only the outer
+   `.forkly-md-editor-scroll` scrolls. Hide every CodeMirror scrollbar so
+   wheel/trackpad never nest against the page scroller. */
 .forkly-md-source-editor {
   min-height: 100%;
 }
@@ -13,9 +16,27 @@
   line-height: 1.6;
 }
 
+/* Override CM5 defaults (`overflow: scroll !important; height: 100%`) so the
+   editor expands to full document height instead of owning a nested pane. */
 .forkly-md-source-editor .CodeMirror-scroll {
-  min-height: calc(100vh - 120px);
+  height: auto !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  margin-bottom: 0;
+  margin-right: 0;
   padding-bottom: 48px;
+}
+
+.forkly-md-source-editor .CodeMirror-sizer {
+  border-right: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.forkly-md-source-editor .CodeMirror-vscrollbar,
+.forkly-md-source-editor .CodeMirror-hscrollbar,
+.forkly-md-source-editor .CodeMirror-scrollbar-filler,
+.forkly-md-source-editor .CodeMirror-gutter-filler {
+  display: none !important;
 }
 
 .forkly-md-source-editor .CodeMirror-gutters {

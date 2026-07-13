@@ -1206,6 +1206,41 @@ func TestContentPutAndAssetAPI(t *testing.T) {
 		t.Fatalf("disk=%q", got)
 	}
 
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("plain\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err = client.Get(base + "/local-api/v1/projects/" + id + "/content?source=worktree&path=notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plain struct {
+		Content  string `json:"content"`
+		Revision string `json:"revision"`
+		Editable bool   `json:"editable"`
+		Kind     string `json:"kind"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&plain)
+	res.Body.Close()
+	if res.StatusCode != 200 || !plain.Editable || plain.Kind != "text" {
+		t.Fatalf("plain get status=%d editable=%v kind=%q", res.StatusCode, plain.Editable, plain.Kind)
+	}
+	plainPut, _ := json.Marshal(map[string]any{"path": "notes.txt", "content": "updated\n", "revision": plain.Revision})
+	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/projects/"+id+"/content", bytes.NewReader(plainPut))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(session.CSRFHeader, csrf)
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("plain put %d", res.StatusCode)
+	}
+	gotPlain, _ := os.ReadFile(filepath.Join(repo, "notes.txt"))
+	if string(gotPlain) != "updated\n" {
+		t.Fatalf("plain disk=%q", gotPlain)
+	}
+
 	// CSRF required for PUT
 	req, _ = http.NewRequest(http.MethodPut, base+"/local-api/v1/projects/"+id+"/content", bytes.NewReader(putBody))
 	req.Header.Set("Content-Type", "application/json")

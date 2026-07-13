@@ -146,7 +146,7 @@ func TestWriteContentRejectsEscapeAndGit(t *testing.T) {
 	}
 }
 
-func TestWriteContentRejectsNonMarkdown(t *testing.T) {
+func TestWriteContentAllowsPlainText(t *testing.T) {
 	repo := t.TempDir()
 	initRepo(t, repo)
 	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hi\n"), 0o644); err != nil {
@@ -157,11 +157,41 @@ func TestWriteContentRejectsNonMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fc.Editable {
-		t.Fatal("plain text should not be editable")
+	if !fc.Editable {
+		t.Fatal("plain UTF-8 text should be editable")
 	}
-	if _, err := e.WriteContent(repo, "a.txt", "bye\n", fc.Revision); err == nil {
-		t.Fatal("expected non-markdown rejection")
+	res, err := e.WriteContent(repo, "a.txt", "bye\n", fc.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Revision == "" {
+		t.Fatal("expected revision")
+	}
+	raw, err := os.ReadFile(filepath.Join(repo, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "bye\n" {
+		t.Fatalf("got %q", raw)
+	}
+}
+
+func TestWriteContentRejectsBinary(t *testing.T) {
+	repo := t.TempDir()
+	initRepo(t, repo)
+	if err := os.WriteFile(filepath.Join(repo, "bin.dat"), []byte{0x00, 0x01, 0x02}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := testExecutor(t)
+	fc, err := e.ReadContent(context.Background(), repo, SourceWorktree, "bin.dat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Editable || fc.Kind != DiffBinary {
+		t.Fatalf("binary should not be editable kind=%s editable=%v", fc.Kind, fc.Editable)
+	}
+	if _, err := e.WriteContent(repo, "bin.dat", "nope\n", "deadbeef"); err == nil {
+		t.Fatal("expected binary rejection")
 	}
 }
 

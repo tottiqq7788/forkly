@@ -23,16 +23,11 @@ export function scrollSourceEditorToLine(
   scrollContainer.scrollTo({ top, behavior: "smooth" });
 }
 
-/**
- * Find the 0-based line of the `headingIndex`-th markdown heading
- * (ATX or setext), skipping fenced code. Returns -1 when not found.
- */
-export function findMarkdownHeadingLine(markdown: string, headingIndex: number): number {
-  if (headingIndex < 0) return -1;
-
+/** Collect 0-based ATX/setext heading lines, skipping fenced code. */
+export function findMarkdownHeadingLines(markdown: string): number[] {
   const lines = markdown.split("\n");
+  const headingLines: number[] = [];
   let fence: string | null = null;
-  let count = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -47,18 +42,25 @@ export function findMarkdownHeadingLine(markdown: string, headingIndex: number):
     if (fence !== null) continue;
 
     if (/^ {0,3}#{1,6}(?:\s|$)/.test(line)) {
-      if (count === headingIndex) return i;
-      count++;
+      headingLines.push(i);
       continue;
     }
 
     const next = lines[i + 1];
     if (line.trim() !== "" && next !== undefined && /^ {0,3}(?:=+|-+)\s*$/.test(next)) {
-      if (count === headingIndex) return i;
-      count++;
+      headingLines.push(i);
       i++;
     }
   }
 
-  return -1;
+  return headingLines;
+}
+
+/**
+ * Find the 0-based line of the `headingIndex`-th markdown heading.
+ * Returns -1 when not found.
+ */
+export function findMarkdownHeadingLine(markdown: string, headingIndex: number): number {
+  if (headingIndex < 0) return -1;
+  return findMarkdownHeadingLines(markdown)[headingIndex] ?? -1;
 }

@@ -109,10 +109,12 @@ vi.mock("../components/files/markdown/MarkdownSourceEditorView", async () => {
   const Fake = React.forwardRef(function Fake(
     {
       markdown,
+      languageMode = "markdown",
       onChange,
       onReady,
     }: {
       markdown: string;
+      languageMode?: "markdown" | "text/plain";
       onChange?: () => void;
       onReady?: () => void;
     },
@@ -148,6 +150,7 @@ vi.mock("../components/files/markdown/MarkdownSourceEditorView", async () => {
     }, []);
     return React.createElement("textarea", {
       "data-testid": "markdown-source-editor",
+      "data-language-mode": languageMode,
       value,
       onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const next = e.target.value;
@@ -247,9 +250,16 @@ describe("MarkdownEditorPage", () => {
     expect(await screen.findByText("缺少文件路径")).toBeInTheDocument();
   });
 
-  it("rejects non-markdown path", async () => {
-    renderAt("/projects/p1/editor?path=a.txt");
-    expect(await screen.findByText("仅支持 Markdown")).toBeInTheDocument();
+  it("rejects binary files opened via direct URL", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "photo.png",
+      source: "worktree",
+      kind: "binary",
+      size: 12,
+    });
+    renderAt("/projects/p1/editor?path=photo.png");
+    expect(await screen.findByText("暂不支持编辑")).toBeInTheDocument();
+    expect(screen.getByText("二进制文件暂不支持编辑。")).toBeInTheDocument();
   });
 
   it("rejects non-editable markdown", async () => {
@@ -262,6 +272,69 @@ describe("MarkdownEditorPage", () => {
     });
     renderAt("/projects/p1/editor?path=docs%2Fa.md");
     expect(await screen.findByText("文件不可编辑")).toBeInTheDocument();
+  });
+
+  it("defaults markdown documents to preview mode", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("markdown-source-editor")).toBeNull();
+  });
+
+  it("defaults plain text documents to source mode and allows markdown preview", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "notes.txt",
+      source: "worktree",
+      kind: "text",
+      content: "hello text",
+      editable: true,
+      revision: "abc",
+    });
+    renderAt("/projects/p1/editor?path=notes.txt");
+    expect(await screen.findByTestId("markdown-source-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("markdown-source-editor")).toHaveAttribute(
+      "data-language-mode",
+      "text/plain",
+    );
+    expect(screen.getByRole("button", { name: "源码" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("fake-editor")).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "预览" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(screen.queryByTestId("markdown-source-editor")).toBeNull();
+    expect(editorReplaceContent).toHaveBeenCalled();
+  });
+
+  it("saves plain text edits from source mode", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "notes.txt",
+      source: "worktree",
+      kind: "text",
+      content: "hello",
+      editable: true,
+      revision: "abc",
+    });
+    renderAt("/projects/p1/editor?path=notes.txt");
+    const source = await screen.findByTestId("markdown-source-editor");
+    fireEvent.change(source, { target: { value: "hello world" } });
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true }));
+    await waitFor(() => {
+      expect(putFileContent).toHaveBeenCalledWith(
+        "p1",
+        expect.objectContaining({ path: "notes.txt", content: "hello world", revision: "abc" }),
+      );
+    });
   });
 
   it("renders three-column editor chrome for editable markdown", async () => {

@@ -14,7 +14,7 @@ import { ContextMenuItem, ContextMenuPortal, ContextMenuSeparator } from "../ui/
 export type ProjectFilesContextTarget =
   | { kind: "root"; path: "" }
   | { kind: "directory"; entry: TreeEntry; isExpanded: boolean }
-  | { kind: "file"; entry: TreeEntry; isMarkdown: boolean };
+  | { kind: "file"; entry: TreeEntry };
 
 export type ProjectFilesContextMenuState = {
   x: number;
@@ -36,7 +36,7 @@ type Props = {
   onDelete: (path: string, entryKind: TreeEntry["kind"]) => void;
   onToggleDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
-  onEditMarkdown: (path: string) => void;
+  onEditFile: (path: string) => void;
 };
 
 export function ProjectFilesContextMenu({
@@ -53,7 +53,7 @@ export function ProjectFilesContextMenu({
   onDelete,
   onToggleDirectory,
   onOpenFile,
-  onEditMarkdown,
+  onEditFile,
 }: Props) {
   return (
     <ContextMenuPortal x={state.x} y={state.y} onClose={onClose}>
@@ -68,7 +68,7 @@ export function ProjectFilesContextMenu({
         onDelete,
         onToggleDirectory,
         onOpenFile,
-        onEditMarkdown,
+        onEditFile,
       })}
     </ContextMenuPortal>
   );
@@ -169,8 +169,8 @@ function renderMenuItems(target: ProjectFilesContextTarget, source: BrowseSource
       <ContextMenuItem icon={<FileText />} onSelect={() => handlers.onOpenFile(target.entry.path)}>
         打开
       </ContextMenuItem>
-      {writable && target.isMarkdown ? (
-        <ContextMenuItem icon={<PencilSimple />} onSelect={() => handlers.onEditMarkdown(target.entry.path)}>
+      {writable ? (
+        <ContextMenuItem icon={<PencilSimple />} onSelect={() => handlers.onEditFile(target.entry.path)}>
           在新标签页编辑
         </ContextMenuItem>
       ) : null}

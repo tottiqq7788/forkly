@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { findMarkdownHeadingLine, scrollSourceEditorToLine } from "./sourceModeToc";
+import {
+  findMarkdownHeadingLine,
+  findMarkdownHeadingLines,
+  scrollSourceEditorToLine,
+} from "./sourceModeToc";
 
 describe("findMarkdownHeadingLine", () => {
   it("finds ATX headings by index and skips fenced code", () => {
@@ -19,6 +23,7 @@ describe("findMarkdownHeadingLine", () => {
     expect(findMarkdownHeadingLine(md, 1)).toBe(6);
     expect(findMarkdownHeadingLine(md, 2)).toBe(8);
     expect(findMarkdownHeadingLine(md, 3)).toBe(-1);
+    expect(findMarkdownHeadingLines(md)).toEqual([0, 6, 8]);
   });
 
   it("supports setext headings", () => {

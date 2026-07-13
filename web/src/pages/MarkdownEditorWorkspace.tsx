@@ -23,7 +23,10 @@ import {
   type MarkdownEditorMode,
 } from "../components/files/markdown/MarkdownTocPanel";
 import type { MarkdownSourceEditorHandle } from "../components/files/markdown/MarkdownSourceEditorView";
-import { findMarkdownHeadingLine } from "../components/files/markdown/sourceModeToc";
+import {
+  findMarkdownHeadingLine,
+  findMarkdownHeadingLines,
+} from "../components/files/markdown/sourceModeToc";
 import { useMarkdownDocument } from "../components/files/markdown/useMarkdownDocument";
 import { useRegisterMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
@@ -168,6 +171,9 @@ export function MarkdownEditorWorkspace({
   transport: DocumentTransport;
   file: FileContent;
 }) {
+  const isMarkdownDocument = isMarkdownPath(file.path);
+  const defaultEditorMode: MarkdownEditorMode = isMarkdownDocument ? "wysiwyg" : "source";
+  const sourceLanguageMode = isMarkdownDocument ? "markdown" : "text/plain";
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
   const sourceEditorRef = useRef<MarkdownSourceEditorHandle | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
@@ -177,12 +183,14 @@ export function MarkdownEditorWorkspace({
   const suppressScrollSaveRef = useRef(false);
   const tocRef = useRef<TocItem[]>([]);
   const wysiwygSelectionRef = useRef<unknown>(null);
-  const editorModeRef = useRef<MarkdownEditorMode>("wysiwyg");
+  const editorModeRef = useRef<MarkdownEditorMode>(defaultEditorMode);
   const sourceBootstrapRef = useRef<string | null>(null);
-  const [editorMode, setEditorMode] = useState<MarkdownEditorMode>("wysiwyg");
+  const sourceHeadingLinesRef = useRef<number[]>([]);
+  const [editorMode, setEditorMode] = useState<MarkdownEditorMode>(defaultEditorMode);
   editorModeRef.current = editorMode;
   const [sourceCursor, setSourceCursor] = useState<IndexCursor | null>(null);
   const [sourceBootstrapMarkdown, setSourceBootstrapMarkdown] = useState<string | null>(null);
+  const [sourceReadyTick, setSourceReadyTick] = useState(0);
   const [editorReadyTick, setEditorReadyTick] = useState(0);
   const [toc, setToc] = useState<TocItem[]>([]);
   tocRef.current = toc;
@@ -486,6 +494,7 @@ export function MarkdownEditorWorkspace({
       // Keep a sync ref so autosave/Cmd+S before CodeMirror mounts cannot fall
       // back to a stale React draftMarkdown left behind by Muya-only edits.
       sourceBootstrapRef.current = markdown;
+      sourceHeadingLinesRef.current = findMarkdownHeadingLines(markdown);
       setSourceBootstrapMarkdown(markdown);
       setSourceCursor(cursor);
       editorModeRef.current = "source";
@@ -507,6 +516,7 @@ export function MarkdownEditorWorkspace({
     setSourceCursor(null);
     setSourceBootstrapMarkdown(null);
     sourceBootstrapRef.current = null;
+    sourceHeadingLinesRef.current = [];
     // Avoid marking dirty when the user only peeked at source without edits.
     if (bootstrap == null || markdown !== bootstrap) {
       setDraftFromEditor();
@@ -659,6 +669,88 @@ export function MarkdownEditorWorkspace({
     };
   }, [toc, editorMode]);
 
+  useEffect(() => {
+    const root = scrollRootRef.current;
+    const editor = sourceEditorRef.current;
+    if (
+      !root ||
+      !editor ||
+      toc.length === 0 ||
+      editorMode !== "source"
+    ) {
+      return;
+    }
+    // Preserve non-null narrowing inside event-listener closures.
+    const scrollRoot = root;
+    const sourceEditor = editor;
+    const tocSlugs = toc.map((item) => item.slug);
+
+    function clearTocNavLock() {
+      const lock = tocNavLockRef.current;
+      if (!lock) return;
+      if (lock.timer != null) window.clearTimeout(lock.timer);
+      tocNavLockRef.current = null;
+    }
+
+    function syncActiveFromSourceScroll() {
+      const host = scrollRoot.querySelector<HTMLElement>(".forkly-md-source-editor");
+      if (!host) return;
+      const hostTop =
+        host.getBoundingClientRect().top -
+        scrollRoot.getBoundingClientRect().top +
+        scrollRoot.scrollTop;
+      const headingTops = sourceHeadingLinesRef.current
+        .slice(0, tocSlugs.length)
+        .map((line) => hostTop + sourceEditor.heightAtLine(line));
+      if (headingTops.length === 0) return;
+
+      const current = resolveActiveTocSlug(
+        headingTops,
+        tocSlugs,
+        scrollRoot.scrollTop + 24,
+      );
+      const decision = shouldApplyScrollDerivedTocActive(
+        tocNavLockRef.current?.slug,
+        current,
+      );
+      if (decision.clearLock) clearTocNavLock();
+      if (!decision.apply) return;
+      setActiveSlug((prev) => (prev === current ? prev : current));
+    }
+
+    function onUserScrollIntent() {
+      if (!tocNavLockRef.current) return;
+      clearTocNavLock();
+      syncActiveFromSourceScroll();
+    }
+
+    syncActiveFromScrollRef.current = syncActiveFromSourceScroll;
+    syncActiveFromSourceScroll();
+    scrollRoot.addEventListener("scroll", syncActiveFromSourceScroll, { passive: true });
+    scrollRoot.addEventListener("wheel", onUserScrollIntent, { passive: true });
+    scrollRoot.addEventListener("touchmove", onUserScrollIntent, { passive: true });
+    return () => {
+      clearTocNavLock();
+      if (syncActiveFromScrollRef.current === syncActiveFromSourceScroll) {
+        syncActiveFromScrollRef.current = () => undefined;
+      }
+      scrollRoot.removeEventListener("scroll", syncActiveFromSourceScroll);
+      scrollRoot.removeEventListener("wheel", onUserScrollIntent);
+      scrollRoot.removeEventListener("touchmove", onUserScrollIntent);
+    };
+  }, [toc, editorMode, sourceReadyTick]);
+
+  function lockTocNavigation(slug: string) {
+    const previous = tocNavLockRef.current;
+    if (previous?.timer != null) window.clearTimeout(previous.timer);
+    const timer = window.setTimeout(() => {
+      if (tocNavLockRef.current?.slug !== slug) return;
+      tocNavLockRef.current = null;
+      syncActiveFromScrollRef.current();
+    }, TOC_NAV_LOCK_MS);
+    tocNavLockRef.current = { slug, timer };
+  }
+
   function selectTocHeading(slug: string) {
     setActiveSlug(slug);
 
@@ -668,6 +760,7 @@ export function MarkdownEditorWorkspace({
       const index = tocRef.current.findIndex((item) => item.slug === slug);
       const line = findMarkdownHeadingLine(src.getValue(), index);
       if (line < 0) return;
+      lockTocNavigation(slug);
       src.scrollToLine(line);
       const top = src.heightAtLine(line);
       scrollRootRef.current?.scrollTo({ top, behavior: "smooth" });
@@ -676,16 +769,7 @@ export function MarkdownEditorWorkspace({
 
     const ok = editorRef.current?.scrollToHeading(slug) ?? false;
     if (!ok) return;
-
-    const prev = tocNavLockRef.current;
-    if (prev?.timer != null) window.clearTimeout(prev.timer);
-    // Deadman unlock when scrollend is unavailable; sync so highlight is not stuck.
-    const timer = window.setTimeout(() => {
-      if (tocNavLockRef.current?.slug !== slug) return;
-      tocNavLockRef.current = null;
-      syncActiveFromScrollRef.current();
-    }, TOC_NAV_LOCK_MS);
-    tocNavLockRef.current = { slug, timer };
+    lockTocNavigation(slug);
   }
 
   async function copyDraft() {
@@ -697,6 +781,10 @@ export function MarkdownEditorWorkspace({
   }
 
   function handleCommand(cmd: FormatCommand) {
+    if (!isMarkdownDocument && cmd === "image") {
+      setEditorError(new Error("非 Markdown 文件不支持图片上传"));
+      return;
+    }
     if (editorModeRef.current === "source") {
       const src = sourceEditorRef.current;
       if (!src) return;
@@ -775,8 +863,30 @@ export function MarkdownEditorWorkspace({
   }, []);
 
   const handleSourceEditorReady = useCallback(() => {
-    sourceEditorRef.current?.focus();
+    const sourceEditor = sourceEditorRef.current;
+    if (!sourceEditor) return;
+    sourceHeadingLinesRef.current = findMarkdownHeadingLines(sourceEditor.getValue());
+    sourceEditor.focus();
+    setSourceReadyTick((tick) => tick + 1);
   }, []);
+
+  const handleSourceEditorChange = useCallback(() => {
+    const sourceEditor = sourceEditorRef.current;
+    if (sourceEditor) {
+      sourceHeadingLinesRef.current = findMarkdownHeadingLines(sourceEditor.getValue());
+    }
+    setDraftFromEditor();
+  }, [setDraftFromEditor]);
+
+  const uploadAsset = useCallback(
+    async (blob: Blob, filename?: string) => {
+      if (!isMarkdownDocument) {
+        throw new Error("非 Markdown 文件不支持图片上传");
+      }
+      return transport.uploadAsset(blob, filename);
+    },
+    [isMarkdownDocument, transport],
+  );
 
   const openHref = useCallback((href: string) => {
     window.open(href, "_blank", "noopener,noreferrer");
@@ -850,7 +960,7 @@ export function MarkdownEditorWorkspace({
               type="button"
               onClick={() => {
                 void discardDraft().then(() => {
-                  setEditorMode("wysiwyg");
+                  setEditorMode(defaultEditorMode);
                   setSourceCursor(null);
                   setSourceBootstrapMarkdown(null);
                   sourceBootstrapRef.current = null;
@@ -875,7 +985,7 @@ export function MarkdownEditorWorkspace({
             className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)]"
             onClick={() => {
               setEditorError(null);
-              setEditorMode("wysiwyg");
+              setEditorMode(defaultEditorMode);
               setSourceCursor(null);
               setSourceBootstrapMarkdown(null);
               sourceBootstrapRef.current = null;
@@ -1046,7 +1156,7 @@ export function MarkdownEditorWorkspace({
                 documentKey={transport.remountKey}
                 markdownPath={transport.markdownPath}
                 assetURL={transport.assetURL}
-                uploadAsset={transport.uploadAsset}
+                uploadAsset={uploadAsset}
                 onChange={() => setDraftFromEditor()}
                 onTocChange={setToc}
                 onReady={handleEditorReady}
@@ -1059,8 +1169,9 @@ export function MarkdownEditorWorkspace({
                     key={`source-${editorKey}`}
                     ref={sourceEditorRef}
                     markdown={sourceBootstrapMarkdown ?? draftMarkdown}
+                    languageMode={sourceLanguageMode}
                     cursor={sourceCursor}
-                    onChange={() => setDraftFromEditor()}
+                    onChange={handleSourceEditorChange}
                     onReady={handleSourceEditorReady}
                   />
                 </Suspense>

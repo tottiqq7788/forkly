@@ -5,19 +5,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectFilesPanel } from "./ProjectFilesPanel";
 
 const apiMock = vi.hoisted(() => vi.fn());
+const fetchFileContentMock = vi.hoisted(() => vi.fn());
 const createProjectEntryMock = vi.hoisted(() => vi.fn());
 const renameProjectEntryMock = vi.hoisted(() => vi.fn());
 const deleteProjectEntryMock = vi.hoisted(() => vi.fn());
 const revealProjectPathMock = vi.hoisted(() => vi.fn());
 const clipboardWriteMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../api", () => ({
-  api: (...args: unknown[]) => apiMock(...args),
-  createProjectEntry: (...args: unknown[]) => createProjectEntryMock(...args),
-  renameProjectEntry: (...args: unknown[]) => renameProjectEntryMock(...args),
-  deleteProjectEntry: (...args: unknown[]) => deleteProjectEntryMock(...args),
-  revealProjectPath: (...args: unknown[]) => revealProjectPathMock(...args),
-}));
+vi.mock("../../api", async () => {
+  const actual = await vi.importActual<typeof import("../../api")>("../../api");
+  return {
+    ...actual,
+    api: (...args: unknown[]) => apiMock(...args),
+    fetchFileContent: (...args: unknown[]) => fetchFileContentMock(...args),
+    createProjectEntry: (...args: unknown[]) => createProjectEntryMock(...args),
+    renameProjectEntry: (...args: unknown[]) => renameProjectEntryMock(...args),
+    deleteProjectEntry: (...args: unknown[]) => deleteProjectEntryMock(...args),
+    revealProjectPath: (...args: unknown[]) => revealProjectPathMock(...args),
+  };
+});
 
 function contentPath(url: string): string {
   return new URL(url, "http://localhost").searchParams.get("path") || "";
@@ -26,6 +32,7 @@ function contentPath(url: string): string {
 describe("ProjectFilesPanel selection", () => {
   beforeEach(() => {
     apiMock.mockReset();
+    fetchFileContentMock.mockReset();
     createProjectEntryMock.mockReset();
     renameProjectEntryMock.mockReset();
     deleteProjectEntryMock.mockReset();
@@ -36,6 +43,15 @@ describe("ProjectFilesPanel selection", () => {
     deleteProjectEntryMock.mockResolvedValue({ ok: true });
     revealProjectPathMock.mockResolvedValue({ ok: true });
     clipboardWriteMock.mockResolvedValue(undefined);
+    fetchFileContentMock.mockImplementation(async (_projectID: string, source: string, path: string) => ({
+      path,
+      source,
+      kind: "text",
+      content: path,
+      size: path.length,
+      editable: true,
+      revision: "r1",
+    }));
     Object.defineProperty(globalThis.navigator, "clipboard", {
       configurable: true,
       writable: true,
@@ -129,7 +145,7 @@ describe("ProjectFilesPanel selection", () => {
     );
   });
 
-  it("shows markdown mode footer and edit affordance for worktree markdown", async () => {
+  it("shows edit affordance for worktree files and gates by content type", async () => {
     apiMock.mockImplementation(async (url: string) => {
       if (url.includes("/tree?")) {
         return {
@@ -138,6 +154,9 @@ describe("ProjectFilesPanel selection", () => {
           entries: [
             { name: "note.md", path: "note.md", kind: "file" },
             { name: "a.txt", path: "a.txt", kind: "file" },
+            { name: "photo.png", path: "photo.png", kind: "file" },
+            { name: "huge.log", path: "huge.log", kind: "file" },
+            { name: "link", path: "link", kind: "symlink" },
           ],
           offset: 0,
           limit: 200,
@@ -146,17 +165,40 @@ describe("ProjectFilesPanel selection", () => {
       }
       if (url.includes("/content?")) {
         const path = contentPath(url);
+        if (path === "photo.png") {
+          return { path, source: "worktree", kind: "binary", size: 12 };
+        }
+        if (path === "huge.log") {
+          return { path, source: "worktree", kind: "too_large", size: 2_000_000 };
+        }
         return {
           path,
           source: "worktree",
           kind: "text",
           content: path.endsWith(".md") ? "# Hi" : path,
           size: 4,
-          editable: path.endsWith(".md"),
+          editable: true,
           revision: "r1",
         };
       }
       throw new Error(`unexpected API: ${url}`);
+    });
+    fetchFileContentMock.mockImplementation(async (_id: string, source: string, path: string) => {
+      if (path === "photo.png") {
+        return { path, source, kind: "binary", size: 12 };
+      }
+      if (path === "huge.log") {
+        return { path, source, kind: "too_large", size: 2_000_000 };
+      }
+      return {
+        path,
+        source,
+        kind: "text",
+        content: path.endsWith(".md") ? "# Hi" : "plain",
+        size: 4,
+        editable: true,
+        revision: "r1",
+      };
     });
 
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
@@ -174,13 +216,34 @@ describe("ProjectFilesPanel selection", () => {
     );
     expect(screen.getByRole("button", { name: "源码" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑 note.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 a.txt" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 photo.png" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 huge.log" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑 link" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "编辑 note.md" }));
-    expect(openSpy).toHaveBeenCalledWith(
-      "/projects/p1/editor?path=note.md",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(
+        "/projects/p1/editor?path=note.md",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "编辑 a.txt" }));
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(
+        "/projects/p1/editor?path=a.txt",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "编辑 photo.png" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("二进制文件暂不支持编辑");
+
+    await user.click(screen.getByRole("button", { name: "编辑 huge.log" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("文件过大暂不支持编辑");
 
     await user.click(screen.getByTitle("a.txt"));
     await waitFor(() => {
@@ -188,6 +251,49 @@ describe("ProjectFilesPanel selection", () => {
     });
 
     openSpy.mockRestore();
+  });
+
+  it("hides edit affordance in HEAD version view", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        const source = url.includes("source=head") ? "head" : "worktree";
+        return {
+          path: "",
+          source,
+          entries: [{ name: "note.md", path: "note.md", kind: "file" }],
+          offset: 0,
+          limit: 200,
+          hasMore: false,
+        };
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return {
+          path,
+          source: url.includes("source=head") ? "head" : "worktree",
+          kind: "text",
+          content: "# Hi",
+          size: 4,
+          editable: false,
+          revision: "r1",
+        };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" preferredPath="note.md" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "编辑 note.md" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "版本" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "编辑 note.md" })).toBeNull();
+    });
   });
 
   it("opens the root context menu and creates a file", async () => {

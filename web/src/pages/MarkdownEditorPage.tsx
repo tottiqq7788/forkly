@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, fetchFileContent, fetchSessionMe, type FileContent, type Project } from "../api";
-import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
 import { createProjectDocumentTransport } from "../components/files/markdown/documentTransport";
 import { FullPageMessage, MarkdownEditorWorkspace } from "./MarkdownEditorWorkspace";
 import { EditorErrorBoundary } from "./EditorErrorBoundary";
@@ -51,11 +50,7 @@ export default function MarkdownEditorPage() {
   }
 
   if (!path) {
-    return <FullPageMessage title="缺少文件路径" body="请从项目文件树通过编辑按钮打开 Markdown。" />;
-  }
-
-  if (!isMarkdownPath(path)) {
-    return <FullPageMessage title="仅支持 Markdown" body="独立编辑页只用于可编辑的 Markdown 文件。" />;
+    return <FullPageMessage title="缺少文件路径" body="请从项目文件树通过编辑按钮打开文件。" />;
   }
 
   if (me.isLoading || fileQuery.isLoading || project.isLoading) {
@@ -75,12 +70,24 @@ export default function MarkdownEditorPage() {
     return <FullPageMessage title="文件不存在" body={path} />;
   }
 
+  if (file.kind === "binary" || file.kind === "image") {
+    return <FullPageMessage title="暂不支持编辑" body="二进制文件暂不支持编辑。" />;
+  }
+
+  if (file.kind === "too_large" || file.truncated) {
+    return <FullPageMessage title="暂不支持编辑" body="文件过大暂不支持编辑。" />;
+  }
+
+  if (file.kind !== "text") {
+    return <FullPageMessage title="暂不支持编辑" body="该文件暂不支持编辑。" />;
+  }
+
   const editable = !!file.editable && file.source === "worktree" && !file.truncated;
   if (!editable) {
     return (
       <FullPageMessage
         title="文件不可编辑"
-        body="仅工作区中未超限的 Markdown 文件可在独立编辑页打开。"
+        body="仅工作区中未超限的文本文件可在独立编辑页打开。"
       />
     );
   }
@@ -89,7 +96,7 @@ export default function MarkdownEditorPage() {
     <EditorErrorBoundary
       resetKey={transport.remountKey}
       title="项目编辑器出错"
-      fallbackBody="页面发生错误。可尝试重新加载，或从项目文件树再次打开该 Markdown。"
+      fallbackBody="页面发生错误。可尝试重新加载，或从项目文件树再次打开该文件。"
     >
       <MarkdownEditorWorkspace key={transport.remountKey} transport={transport} file={file} />
     </EditorErrorBoundary>

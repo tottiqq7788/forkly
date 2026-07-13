@@ -137,12 +137,12 @@ func enrichTextContent(out FileContent, raw []byte) FileContent {
 	out.LineEnding = meta.lineEnding
 	out.HasFinalNewline = meta.hasFinalNewline
 	out.Content = meta.normalized
+	// Any safe UTF-8 worktree text file is editable; Markdown is not required.
 	editable := out.Source == SourceWorktree &&
 		!out.Truncated &&
 		out.Kind == DiffText &&
 		out.Size <= MaxEditBytes &&
-		out.Message == "" &&
-		isMarkdownRel(out.Path)
+		out.Message == ""
 	out.Editable = editable
 	return out
 }
@@ -162,7 +162,7 @@ func IsMarkdownPath(path string) bool {
 	}
 }
 
-// WriteContent atomically replaces a worktree Markdown file when expectedRevision matches.
+// WriteContent atomically replaces a worktree UTF-8 text file when expectedRevision matches.
 func (e *Executor) WriteContent(repo, rel, content, expectedRevision string) (WriteContentResult, error) {
 	rel, err := normalizeBrowsePath(rel)
 	if err != nil {
@@ -173,9 +173,6 @@ func (e *Executor) WriteContent(repo, rel, content, expectedRevision string) (Wr
 	}
 	if isGitMetaPath(rel) {
 		return WriteContentResult{}, fmt.Errorf("不允许访问 .git")
-	}
-	if !isMarkdownRel(rel) {
-		return WriteContentResult{}, fmt.Errorf("仅支持编辑 Markdown 文件")
 	}
 	if int64(len(content)) > MaxEditBytes {
 		return WriteContentResult{}, fmt.Errorf("内容超过编辑上限")

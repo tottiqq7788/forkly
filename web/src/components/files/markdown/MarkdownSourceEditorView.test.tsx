@@ -9,6 +9,7 @@ const cmApi = {
   getCursor: vi.fn(() => ({ line: 0, ch: 0 })),
   setCursor: vi.fn(),
   setSelection: vi.fn(),
+  setSize: vi.fn(),
   getScrollInfo: vi.fn(() => ({ left: 0, top: 0 })),
   scrollTo: vi.fn(),
   focus: vi.fn(),
@@ -45,6 +46,7 @@ describe("MarkdownSourceEditorView", () => {
     cmApi.getCursor.mockReset();
     cmApi.setCursor.mockReset();
     cmApi.setSelection.mockReset();
+    cmApi.setSize.mockReset();
     cmApi.getScrollInfo.mockReset();
     cmApi.scrollTo.mockReset();
     cmApi.focus.mockReset();
@@ -72,6 +74,13 @@ describe("MarkdownSourceEditorView", () => {
     await waitFor(() => {
       expect(ref.current).toBeTruthy();
     });
+    expect(cmApi.setSize).toHaveBeenCalledWith(null, "auto");
+
+    const CodeMirror = (await import("codemirror")).default as unknown as ReturnType<typeof vi.fn>;
+    expect(CodeMirror).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mode: "markdown" }),
+    );
 
     expect(ref.current?.getValue()).toBe("# Title\n\nbody");
 
@@ -104,5 +113,18 @@ describe("MarkdownSourceEditorView", () => {
     const result = ref.current?.search("Title");
     expect(result?.index).toBe(0);
     expect(result?.matches).toHaveLength(1);
+  });
+
+  it("uses text/plain mode for non-markdown source documents", async () => {
+    const CodeMirror = (await import("codemirror")).default as unknown as ReturnType<typeof vi.fn>;
+    CodeMirror.mockClear();
+    render(<MarkdownSourceEditorView markdown="plain text" languageMode="text/plain" />);
+    await waitFor(() => {
+      expect(CodeMirror).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ mode: "text/plain" }),
+      );
+    });
+    expect(document.querySelector('[data-language-mode="text/plain"]')).toBeTruthy();
   });
 });

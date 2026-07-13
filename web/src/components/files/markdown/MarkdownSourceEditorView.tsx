@@ -34,6 +34,8 @@ export type MarkdownSourceEditorHandle = {
 
 type Props = {
   markdown: string;
+  /** CodeMirror mode; non-Markdown text uses plain text without Markdown highlighting. */
+  languageMode?: "markdown" | "text/plain";
   cursor?: IndexCursor | null;
   onChange?: () => void;
   onReady?: () => void;
@@ -67,7 +69,10 @@ type EditorWithSearch = CodeMirror.Editor & {
 const EMPTY_SEARCH: SearchResult = { matches: [], index: -1 };
 
 export const MarkdownSourceEditorView = forwardRef<MarkdownSourceEditorHandle, Props>(
-  function MarkdownSourceEditorView({ markdown, cursor = null, onChange, onReady }, ref) {
+  function MarkdownSourceEditorView(
+    { markdown, languageMode = "markdown", cursor = null, onChange, onReady },
+    ref,
+  ) {
     const hostRef = useRef<HTMLDivElement>(null);
     const cmRef = useRef<CodeMirror.Editor | null>(null);
     const searchRef = useRef<SearchState>({
@@ -129,13 +134,15 @@ export const MarkdownSourceEditorView = forwardRef<MarkdownSourceEditorHandle, P
 
       const cm = CodeMirror(host, {
         value: markdown,
-        mode: "markdown",
+        mode: languageMode,
         lineNumbers: true,
         lineWrapping: true,
         styleActiveLine: true,
         viewportMargin: Infinity,
         autofocus: true,
       });
+      // Grow with document height; outer `.forkly-md-editor-scroll` owns scrolling.
+      cm.setSize(null, "auto");
       cmRef.current = cm;
 
       if (cursor?.anchor && cursor.focus) {
@@ -180,6 +187,7 @@ export const MarkdownSourceEditorView = forwardRef<MarkdownSourceEditorHandle, P
         ref={hostRef}
         className="forkly-md-source-editor"
         data-testid="markdown-source-editor"
+        data-language-mode={languageMode}
       />
     );
   },

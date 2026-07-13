@@ -10,8 +10,10 @@ import {
 import {
   api,
   BrowseSource,
+  CONTENT_NOT_MODIFIED,
   createProjectEntry,
   deleteProjectEntry,
+  fetchFileContent,
   FileContent,
   renameProjectEntry,
   revealProjectPath,
@@ -283,9 +285,30 @@ export function ProjectFilesPanel({
     setSource(next);
   }
 
-  function openMarkdownEditor(path: string) {
-    const url = `/projects/${projectID}/editor?path=${encodeURIComponent(path)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+  async function openEditorForPath(path: string) {
+    try {
+      const file = await fetchFileContent(projectID, "worktree", path);
+      if (file === CONTENT_NOT_MODIFIED) {
+        showError("无法读取文件内容");
+        return;
+      }
+      if (file.kind === "binary" || file.kind === "image") {
+        showError("二进制文件暂不支持编辑");
+        return;
+      }
+      if (file.kind === "too_large" || file.truncated || !file.editable) {
+        showError("文件过大暂不支持编辑");
+        return;
+      }
+      if (file.kind !== "text") {
+        showError("该文件暂不支持编辑");
+        return;
+      }
+      const url = `/projects/${projectID}/editor?path=${encodeURIComponent(path)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "无法打开编辑器");
+    }
   }
 
   function toggleDir(path: string) {
@@ -479,7 +502,7 @@ export function ProjectFilesPanel({
                     onExpandDirs={expandDirs}
                     onEntriesLoaded={reportEntries}
                     onSelectFile={selectFile}
-                    onEditMarkdown={openMarkdownEditor}
+                    onEditFile={(path) => void openEditorForPath(path)}
                     onOpenContextMenu={setMenu}
                   />
                 ))
@@ -522,7 +545,7 @@ export function ProjectFilesPanel({
             onDelete={(path, entryKind) => void runMenuAction(() => deleteEntry(path, entryKind))}
             onToggleDirectory={(path) => void runMenuAction(() => toggleDir(path))}
             onOpenFile={(path) => void runMenuAction(() => selectFile(path))}
-            onEditMarkdown={(path) => void runMenuAction(() => openMarkdownEditor(path))}
+            onEditFile={(path) => void runMenuAction(() => openEditorForPath(path))}
           />
         ) : null}
         {nameDialog ? (
@@ -638,7 +661,7 @@ function TreeNode({
   onExpandDirs,
   onEntriesLoaded,
   onSelectFile,
-  onEditMarkdown,
+  onEditFile,
   onOpenContextMenu,
 }: {
   projectID: string;
@@ -651,14 +674,14 @@ function TreeNode({
   onExpandDirs: (paths: string[]) => void;
   onEntriesLoaded: (dirPath: string, entries: TreeEntry[]) => void;
   onSelectFile: (path: string) => void | Promise<void>;
-  onEditMarkdown: (path: string) => void;
+  onEditFile: (path: string) => void;
   onOpenContextMenu: (menu: ProjectFilesContextMenuState) => void;
 }) {
   const isDir = entry.kind === "dir";
   const isOpen = isDir && expanded.has(entry.path);
   const active = activePath === entry.path;
-  const canEditMarkdown =
-    source === "worktree" && entry.kind === "file" && isMarkdownPath(entry.path);
+  const canEditFile = source === "worktree" && entry.kind === "file";
+
 
   const childQuery = useInfiniteQuery({
     queryKey: ["workspace-tree", projectID, source, entry.path],
@@ -717,7 +740,7 @@ function TreeNode({
             y: event.clientY,
             target: isDir
               ? { kind: "directory", entry, isExpanded: isOpen }
-              : { kind: "file", entry, isMarkdown: entry.kind === "file" && isMarkdownPath(entry.path) },
+              : { kind: "file", entry },
           });
         }}
       >
@@ -749,7 +772,7 @@ function TreeNode({
           </span>
           <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
         </button>
-        {canEditMarkdown ? (
+        {canEditFile ? (
           <button
             type="button"
             className={`shrink-0 rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-tertiary)] focus-visible:opacity-100 hover:text-[var(--color-accent-muted)] hover:bg-[var(--color-surface)] ${
@@ -761,7 +784,7 @@ function TreeNode({
             aria-label={`编辑 ${entry.name}`}
             onClick={(e) => {
               e.stopPropagation();
-              onEditMarkdown(entry.path);
+              onEditFile(entry.path);
             }}
           >
             <PencilSimple size={14} />
@@ -799,7 +822,7 @@ function TreeNode({
               onExpandDirs={onExpandDirs}
               onEntriesLoaded={onEntriesLoaded}
               onSelectFile={onSelectFile}
-              onEditMarkdown={onEditMarkdown}
+              onEditFile={onEditFile}
               onOpenContextMenu={onOpenContextMenu}
             />
           ))}
