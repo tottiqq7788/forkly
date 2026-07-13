@@ -218,7 +218,13 @@ export async function fetchFileContent(
   if (opts?.etag) headers.set("If-None-Match", opts.etag);
   const res = await fetch(
     `/local-api/v1/projects/${projectID}/content?source=${source}&path=${encodeURIComponent(path)}`,
-    { headers, credentials: "same-origin" },
+    {
+      headers,
+      credentials: "same-origin",
+      // Content JSON includes policy flags (editable) that can change without the
+      // file bytes changing; never reuse a stale cached body after backend upgrades.
+      cache: "no-store",
+    },
   );
   if (res.status === 304) return CONTENT_NOT_MODIFIED;
   const data = await res.json().catch(() => ({}));
@@ -328,6 +334,7 @@ export async function fetchLocalFileContent(
   const res = await fetch(`/local-api/v1/local-files/${encodeURIComponent(fileId)}/content`, {
     headers,
     credentials: "same-origin",
+    cache: "no-store",
   });
   if (res.status === 304) return CONTENT_NOT_MODIFIED;
   const data = await res.json().catch(() => ({}));

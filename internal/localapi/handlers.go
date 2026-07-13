@@ -287,7 +287,8 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 			if content.Revision != "" {
 				etag := `"` + content.Revision + `"`
 				w.Header().Set("ETag", etag)
-				w.Header().Set("Cache-Control", "private, no-cache")
+				// editable/truncated flags can change without file bytes changing.
+				w.Header().Set("Cache-Control", "private, no-store")
 				if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
 					w.WriteHeader(http.StatusNotModified)
 					return

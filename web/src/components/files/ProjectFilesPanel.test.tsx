@@ -245,6 +245,26 @@ describe("ProjectFilesPanel selection", () => {
     await user.click(screen.getByRole("button", { name: "编辑 huge.log" }));
     expect(await screen.findByRole("status")).toHaveTextContent("文件过大暂不支持编辑");
 
+    // Stale editable:false must not block opening UTF-8 text (content cache / old backend).
+    fetchFileContentMock.mockResolvedValueOnce({
+      path: "a.txt",
+      source: "worktree",
+      kind: "text",
+      content: "plain",
+      size: 5,
+      editable: false,
+      revision: "r-stale",
+    });
+    openSpy.mockClear();
+    await user.click(screen.getByRole("button", { name: "编辑 a.txt" }));
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(
+        "/projects/p1/editor?path=a.txt",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    });
+
     await user.click(screen.getByTitle("a.txt"));
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "预览" })).toBeNull();

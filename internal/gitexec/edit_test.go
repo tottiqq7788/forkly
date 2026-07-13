@@ -152,6 +152,9 @@ func TestWriteContentAllowsPlainText(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(repo, "cfg.json"), []byte(`{"a":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	e := testExecutor(t)
 	fc, err := e.ReadContent(context.Background(), repo, SourceWorktree, "a.txt")
 	if err != nil {
@@ -173,6 +176,17 @@ func TestWriteContentAllowsPlainText(t *testing.T) {
 	}
 	if string(raw) != "bye\n" {
 		t.Fatalf("got %q", raw)
+	}
+
+	jc, err := e.ReadContent(context.Background(), repo, SourceWorktree, "cfg.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !jc.Editable || jc.Kind != DiffText {
+		t.Fatalf("json should be editable kind=%s editable=%v", jc.Kind, jc.Editable)
+	}
+	if _, err := e.WriteContent(repo, "cfg.json", "{\"a\":2}\n", jc.Revision); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -250,6 +250,7 @@ export function ProjectFilesPanel({
     queryFn: () =>
       api<FileContent>(
         `/local-api/v1/projects/${projectID}/content?source=${source}&path=${encodeURIComponent(activePath)}`,
+        { cache: "no-store" },
       ),
     enabled: !!activePath,
   });
@@ -300,12 +301,13 @@ export function ProjectFilesPanel({
         showError("文件过大暂不支持编辑");
         return;
       }
-      if (file.kind !== "text" || !file.editable) {
-        showError("该文件暂不支持编辑");
+      // Request is always worktree; open any UTF-8 text (ignore possibly stale editable).
+      if (file.kind === "text") {
+        const url = `/projects/${projectID}/editor?path=${encodeURIComponent(path)}`;
+        window.open(url, "_blank", "noopener,noreferrer");
         return;
       }
-      const url = `/projects/${projectID}/editor?path=${encodeURIComponent(path)}`;
-      window.open(url, "_blank", "noopener,noreferrer");
+      showError("该文件暂不支持编辑");
     } catch (error) {
       showError(error instanceof Error ? error.message : "无法打开编辑器");
     }
