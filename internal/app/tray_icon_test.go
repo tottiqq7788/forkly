@@ -9,6 +9,12 @@ func TestTrayIconEmbedded(t *testing.T) {
 	if len(trayIconPNG) == 0 {
 		t.Fatal("tray icon embed is empty")
 	}
+	if len(trayIconWindowsICO) < 6 {
+		t.Fatal("windows tray icon embed is empty")
+	}
+	if string(trayIconWindowsICO[:4]) != "\x00\x00\x01\x00" {
+		t.Fatal("windows tray icon should be an ICO file")
+	}
 	img, err := decodeTrayIcon()
 	if err != nil {
 		t.Fatalf("decode tray icon: %v", err)

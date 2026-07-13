@@ -2,6 +2,7 @@ package gitexec
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -238,8 +239,20 @@ func (e *Executor) DeleteEntry(repo, rel string) error {
 	}
 	defer root.Close()
 
-	if _, err := root.Lstat(rel); err != nil {
+	info, err := root.Lstat(rel)
+	if err != nil {
 		return fmt.Errorf("路径不存在")
+	}
+	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		f, err := root.Open(rel)
+		if err != nil {
+			return fmt.Errorf("无法访问文件夹")
+		}
+		names, readErr := f.Readdirnames(1)
+		_ = f.Close()
+		if len(names) > 0 || (readErr != nil && readErr != io.EOF) {
+			return fmt.Errorf("仅支持删除空文件夹")
+		}
 	}
 	if err := root.Remove(rel); err != nil {
 		if strings.Contains(err.Error(), "directory not empty") {

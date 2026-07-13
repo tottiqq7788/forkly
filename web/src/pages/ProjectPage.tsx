@@ -748,7 +748,7 @@ export default function ProjectPage() {
                 onClick={() => revealProject.mutate()}
                 className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
               >
-                在访达中显示
+                在文件管理器中显示
               </button>
               <button
                 type="button"

@@ -1,4 +1,4 @@
-.PHONY: dev web build test e2e package-macos fetch-git clean preview-api preview-web
+.PHONY: dev web build test e2e package-macos package-windows fetch-git clean preview-api preview-web
 
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.1.0)
 ARCH ?= arm64
@@ -34,6 +34,9 @@ fetch-git:
 
 package-macos: web fetch-git
 	bash packaging/macos/build.sh $(VERSION) $(ARCH)
+
+package-windows:
+	powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1 -Version $(VERSION) -Arch x64
 
 clean:
 	rm -rf bin dist web/node_modules

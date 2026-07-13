@@ -15,11 +15,11 @@ import (
 )
 
 type Runtime struct {
-	GitPath    string
-	ExecPath   string
+	GitPath     string
+	ExecPath    string
 	TemplateDir string
-	Version    string
-	Bundled    bool
+	Version     string
+	Bundled     bool
 }
 
 type Result struct {
@@ -47,22 +47,23 @@ func DiscoverRuntime(appResources string) (Runtime, error) {
 	candidates := []string{}
 	if appResources != "" {
 		candidates = append(candidates,
+			filepath.Join(appResources, "git", "cmd", "git.exe"),
+			filepath.Join(appResources, "git", "bin", "git.exe"),
 			filepath.Join(appResources, "git", "bin", "git"),
 			filepath.Join(appResources, "git", "git"),
 		)
 	}
 	// Dev fallback: repo-relative third_party
 	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(wd, "third_party", "git", "bin", "git"))
+		candidates = append(candidates,
+			filepath.Join(wd, "third_party", "git", "cmd", "git.exe"),
+			filepath.Join(wd, "third_party", "git", "bin", "git.exe"),
+			filepath.Join(wd, "third_party", "git", "bin", "git"),
+		)
 	}
 	for _, c := range candidates {
 		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			rt := Runtime{
-				GitPath:  c,
-				Bundled:  true,
-				ExecPath: filepath.Join(filepath.Dir(filepath.Dir(c)), "libexec", "git-core"),
-				TemplateDir: filepath.Join(filepath.Dir(filepath.Dir(c)), "share", "git-core", "templates"),
-			}
+			rt := bundledRuntime(c)
 			if ver, err := probeVersion(rt); err == nil {
 				rt.Version = ver
 			}
@@ -79,6 +80,19 @@ func DiscoverRuntime(appResources string) (Runtime, error) {
 		rt.Version = ver
 	}
 	return rt, nil
+}
+
+func bundledRuntime(gitPath string) Runtime {
+	root := filepath.Dir(filepath.Dir(gitPath))
+	rt := Runtime{GitPath: gitPath, Bundled: true}
+	if runtime.GOOS == "windows" {
+		rt.ExecPath = filepath.Join(root, "mingw64", "libexec", "git-core")
+		rt.TemplateDir = filepath.Join(root, "mingw64", "share", "git-core", "templates")
+		return rt
+	}
+	rt.ExecPath = filepath.Join(root, "libexec", "git-core")
+	rt.TemplateDir = filepath.Join(root, "share", "git-core", "templates")
+	return rt
 }
 
 func probeVersion(rt Runtime) (string, error) {
@@ -117,12 +131,12 @@ func (e *Executor) writeLock(repo string) *sync.Mutex {
 }
 
 type RunOpts struct {
-	Repo      string
-	Args      []string
-	Timeout   time.Duration
-	Write     bool
-	Stdin     []byte
-	ExtraEnv  []string
+	Repo     string
+	Args     []string
+	Timeout  time.Duration
+	Write    bool
+	Stdin    []byte
+	ExtraEnv []string
 }
 
 func (e *Executor) Run(ctx context.Context, opts RunOpts) (Result, error) {
@@ -184,13 +198,18 @@ func (e *Executor) Run(ctx context.Context, opts RunOpts) (Result, error) {
 }
 
 func ResourcesDir() string {
-	if runtime.GOOS != "darwin" {
-		return ""
-	}
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	// .app/Contents/MacOS/forkly -> Resources
-	return filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "Resources"))
+	switch runtime.GOOS {
+	case "darwin":
+		// .app/Contents/MacOS/forkly -> Resources
+		return filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "Resources"))
+	case "windows":
+		// Windows installer places git/ next to Forkly.exe.
+		return filepath.Dir(exe)
+	default:
+		return ""
+	}
 }

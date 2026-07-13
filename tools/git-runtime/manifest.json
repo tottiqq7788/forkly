@@ -14,6 +14,16 @@
       "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-3/dugite-native-v2.53.0-f49d009-macOS-x64.tar.gz",
       "sha256": "caf27c36b8834969550535bcd5e58186f970e080d1e175e76d9c1de3aac409ed",
       "filename": "dugite-native-v2.53.0-f49d009-macOS-x64.tar.gz"
+    },
+    "windows-amd64": {
+      "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-3/dugite-native-v2.53.0-f49d009-windows-x64.tar.gz",
+      "sha256": "f843a87a693bfdabed83b8492bca59db6f64d1168c74d23e2c8dfb7388a97142",
+      "filename": "dugite-native-v2.53.0-f49d009-windows-x64.tar.gz"
+    },
+    "windows-arm64": {
+      "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-3/dugite-native-v2.53.0-f49d009-windows-arm64.tar.gz",
+      "sha256": "e16e7023942499c093c8520a145bf20287a08d38d8d69197355df154a8598b06",
+      "filename": "dugite-native-v2.53.0-f49d009-windows-arm64.tar.gz"
     }
   }
 }

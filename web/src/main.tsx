@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, Outlet, RouterProvider } from "react-router-dom";
 import App from "./App";
 import HomePage from "./pages/HomePage";
+import AddProjectPage from "./pages/AddProjectPage";
 import ProjectPage from "./pages/ProjectPage";
 import SettingsPage from "./pages/SettingsPage";
 import MarkdownEditorPage from "./pages/MarkdownEditorPage";
@@ -31,7 +32,7 @@ const router = createBrowserRouter([
         errorElement: <RouteErrorPage />,
         children: [
           { index: true, element: <HomePage /> },
-          { path: "add", element: <HomePage /> },
+          { path: "add", element: <AddProjectPage variant="page" /> },
           { path: "projects/:id", element: <ProjectPage /> },
           { path: "projects/:id/files", element: <ProjectPage /> },
           { path: "projects/:id/changes", element: <ProjectPage /> },

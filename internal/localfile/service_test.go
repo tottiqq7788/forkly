@@ -75,7 +75,7 @@ func TestSymlinkResolvesToRealFile(t *testing.T) {
 	target := writeMD(t, dir, "real.md", "# real\n")
 	link := filepath.Join(dir, "link.md")
 	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlink unsupported: %v", err)
 	}
 	viaLink, err := s.Open(link)
 	if err != nil {

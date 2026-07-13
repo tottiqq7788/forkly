@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.36"
+var Version = "0.1.37"
 
 // LaunchPaths holds Markdown paths collected before the app is fully ready.
 type LaunchOptions struct {
@@ -161,7 +162,11 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 
 	systray.Run(func() {
 		icon := trayIconBytes()
-		systray.SetTemplateIcon(icon, icon)
+		if runtime.GOOS == "windows" {
+			systray.SetIcon(trayWindowsIconBytes())
+		} else {
+			systray.SetTemplateIcon(icon, icon)
+		}
 		systray.SetTitle("")
 		systray.SetTooltip("Forkly " + Version)
 		mOpen := systray.AddMenuItem("打开控制台", "在浏览器中打开本地控制台")

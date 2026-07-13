@@ -160,7 +160,7 @@ export default function HomePage() {
 
       {claimExpired && (
         <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--color-warning-fg)]/30 bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-warning-fg)]">
-          打开链接已失效。请从菜单栏 Forkly 图标重新打开控制台或文件。
+          打开链接已失效。请从系统托盘或菜单栏的 Forkly 图标重新打开控制台或文件。
         </div>
       )}
 

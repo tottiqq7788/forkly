@@ -14,9 +14,12 @@ type InspectResult = {
 export default function AddProjectPage({
   stackIndex = 1,
   onClose,
+  variant = "drawer",
 }: {
   stackIndex?: number;
   onClose?: () => void;
+  /** page：无项目时作为主内容；drawer：有项目时侧滑添加 */
+  variant?: "drawer" | "page";
 }) {
   const [tab, setTab] = useState<"add" | "create">("add");
   const [path, setPath] = useState("");
@@ -26,6 +29,7 @@ export default function AddProjectPage({
   const nav = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
+  const isPage = variant === "page";
 
   function closeDrawer() {
     if (onClose) {
@@ -106,72 +110,124 @@ export default function AddProjectPage({
     inspect.mutate();
   }
 
+  const form = (
+    <>
+      <div
+        className="inline-flex rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-0.5 mb-4"
+        role="tablist"
+        aria-label="添加方式"
+      >
+        <Tab active={tab === "add"} onClick={() => setTab("add")}>
+          添加现有文件夹
+        </Tab>
+        <Tab active={tab === "create"} onClick={() => setTab("create")}>
+          新建空项目
+        </Tab>
+      </div>
+
+      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-4">
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          {tab === "add"
+            ? "若文件夹不是 Git 仓库，Forkly 会自动初始化；若已经是 Git 仓库，会先询问是否复用。"
+            : "将在选定父路径下创建新文件夹并初始化 Git。"}
+        </p>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">{tab === "create" ? "父目录" : "文件夹路径"}</span>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              placeholder="/Users/you/Documents/project"
+            />
+            <button
+              type="button"
+              onClick={() => pick.mutate()}
+              className="rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] px-3 py-2 text-sm"
+            >
+              选择…
+            </button>
+          </div>
+          <span className="text-xs text-[var(--color-text-tertiary)]">支持中文路径与空格</span>
+        </label>
+
+        {tab === "create" && (
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium">项目名称</span>
+            <input
+              className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+        )}
+
+        {error && <p className="text-sm text-[var(--color-error-fg)]">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={closeDrawer} className="px-3 py-1.5 text-sm">
+            {isPage ? "返回首页" : "取消"}
+          </button>
+          <button
+            type="button"
+            disabled={!path || add.isPending || inspect.isPending}
+            onClick={handlePrimary}
+            className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+          >
+            {tab === "create" ? "创建并添加" : inspect.isPending ? "检查中…" : "添加"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
+  const repoChoicePanel = repoChoice && (
+    <div className="mt-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <h2 className="text-base font-semibold mb-2">已检测到 Git 仓库</h2>
+      <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+        <span className="font-mono text-[var(--color-text)]">{repoChoice.path}</span>{" "}
+        已经包含 Git 历史。你可以复用现有仓库，或清空 `.git` 后从当前文件重新开始。
+      </p>
+      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] p-3 text-sm text-[var(--color-text-secondary)] mb-4">
+        默认推荐复用现有仓库；清空重新提交只会移除 `.git` 历史，不会删除项目文件。
+      </div>
+      {error && <p className="text-sm text-[var(--color-error-fg)] mb-3">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={() => submitAdd(false)} className="px-3 py-1.5 text-sm">
+          复用现有仓库
+        </button>
+        <button
+          type="button"
+          disabled={add.isPending}
+          onClick={() => submitAdd(true)}
+          className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+        >
+          清空重新提交
+        </button>
+      </div>
+    </div>
+  );
+
+  if (isPage) {
+    return (
+      <div className="min-h-full p-6 md:p-8">
+        <div className="max-w-xl">
+          <h1 className="text-xl font-semibold tracking-tight mb-1">添加项目</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+            还没有项目。添加本地文件夹后，即可在这里查看变更与版本历史。
+          </p>
+          {form}
+          {repoChoicePanel}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <Drawer title="添加项目" stackIndex={stackIndex} width={576} onClose={closeDrawer}>
-        <div className="flex gap-2 mb-4">
-          <Tab active={tab === "add"} onClick={() => setTab("add")}>
-            添加现有文件夹
-          </Tab>
-          <Tab active={tab === "create"} onClick={() => setTab("create")}>
-            新建空项目
-          </Tab>
-        </div>
-
-        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-4">
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            {tab === "add"
-              ? "若文件夹不是 Git 仓库，Forkly 会自动初始化；若已经是 Git 仓库，会先询问是否复用。"
-              : "将在选定父路径下创建新文件夹并初始化 Git。"}
-          </p>
-
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">{tab === "create" ? "父目录" : "文件夹路径"}</span>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                placeholder="/Users/you/Documents/project"
-              />
-              <button
-                type="button"
-                onClick={() => pick.mutate()}
-                className="rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] px-3 py-2 text-sm"
-              >
-                选择…
-              </button>
-            </div>
-            <span className="text-xs text-[var(--color-text-tertiary)]">支持中文路径与空格</span>
-          </label>
-
-          {tab === "create" && (
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">项目名称</span>
-              <input
-                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-          )}
-
-          {error && <p className="text-sm text-[var(--color-error-fg)]">{error}</p>}
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={closeDrawer} className="px-3 py-1.5 text-sm">
-              取消
-            </button>
-            <button
-              type="button"
-              disabled={!path || add.isPending || inspect.isPending}
-              onClick={handlePrimary}
-              className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-            >
-              {tab === "create" ? "创建并添加" : inspect.isPending ? "检查中…" : "添加"}
-            </button>
-          </div>
-        </div>
+        {form}
       </Drawer>
 
       {repoChoice && (
@@ -207,9 +263,13 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={`rounded-[var(--radius-sm)] px-3 py-1.5 text-sm ${
-        active ? "bg-[var(--color-surface-active)] font-medium" : "text-[var(--color-text-secondary)]"
+      className={`rounded-[3px] px-3 py-1.5 text-sm transition-colors ${
+        active
+          ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium shadow-sm"
+          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
       }`}
     >
       {children}

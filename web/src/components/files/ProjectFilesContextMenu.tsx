@@ -165,7 +165,7 @@ function renderMenuItems(target: ProjectFilesContextTarget, source: BrowseSource
         </MenuItem>
         {writable ? (
           <MenuItem icon={<FolderOpen />} onSelect={() => handlers.onOpenLocation(target.entry.path)}>
-            在访达中打开
+            在文件管理器中打开
           </MenuItem>
         ) : null}
         <MenuSeparator />
@@ -204,7 +204,7 @@ function renderMenuItems(target: ProjectFilesContextTarget, source: BrowseSource
       ) : null}
       {writable ? (
         <MenuItem icon={<FolderOpen />} onSelect={() => handlers.onOpenLocation(target.entry.path)}>
-          在访达中显示
+          在文件管理器中显示
         </MenuItem>
       ) : null}
       <MenuSeparator />

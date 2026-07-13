@@ -10,8 +10,15 @@ import (
 //go:embed assets/tray_icon.png
 var trayIconPNG []byte
 
+//go:embed assets/tray_icon_windows.ico
+var trayIconWindowsICO []byte
+
 func trayIconBytes() []byte {
 	return trayIconPNG
+}
+
+func trayWindowsIconBytes() []byte {
+	return trayIconWindowsICO
 }
 
 func decodeTrayIcon() (image.Image, error) {

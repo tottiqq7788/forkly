@@ -77,7 +77,7 @@ export default function LocalMarkdownEditorPage() {
     <EditorErrorBoundary
       resetKey={transport.remountKey}
       title="本地编辑器出错"
-      fallbackBody="页面发生错误。可尝试重新加载；若仍失败请从 Finder 再次打开该 Markdown 文件。"
+      fallbackBody="页面发生错误。可尝试重新加载；若仍失败请从文件管理器再次打开该 Markdown 文件。"
     >
       <MarkdownEditorWorkspace key={transport.remountKey} transport={transport} file={file} />
     </EditorErrorBoundary>

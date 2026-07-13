@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,11 +15,11 @@ import (
 const Version = 1
 
 type ProjectEntry struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	AddedAt   time.Time `json:"addedAt"`
-	OpenedAt  time.Time `json:"openedAt"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Path     string    `json:"path"`
+	AddedAt  time.Time `json:"addedAt"`
+	OpenedAt time.Time `json:"openedAt"`
 	// HideRules are glob patterns (one conceptually per line in UI).
 	// nil means “never configured” and ResolvedHideRules returns the default;
 	// an empty slice means the user cleared all rules.
@@ -62,15 +63,15 @@ func IdentityConfigured(id GitIdentity) bool {
 }
 
 type Preferences struct {
-	Theme             string `json:"theme"` // system | light | dark
-	BackgroundChecks  bool   `json:"backgroundChecks"`
+	Theme            string `json:"theme"` // system | light | dark
+	BackgroundChecks bool   `json:"backgroundChecks"`
 }
 
 type File struct {
-	Version    int            `json:"version"`
-	Projects   []ProjectEntry `json:"projects"`
-	Identity   GitIdentity    `json:"identity"`
-	Preferences Preferences   `json:"preferences"`
+	Version     int            `json:"version"`
+	Projects    []ProjectEntry `json:"projects"`
+	Identity    GitIdentity    `json:"identity"`
+	Preferences Preferences    `json:"preferences"`
 }
 
 type Store struct {
@@ -80,19 +81,49 @@ type Store struct {
 }
 
 func DefaultDataDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, "Library", "Application Support", "Forkly"), nil
+	case "windows":
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "Forkly"), nil
+	default:
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "forkly"), nil
 	}
-	return filepath.Join(home, "Library", "Application Support", "Forkly"), nil
 }
 
 func DefaultLogDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, "Library", "Logs", "Forkly"), nil
+	case "windows":
+		base, err := os.UserCacheDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "Forkly", "Logs"), nil
+	default:
+		base, err := os.UserCacheDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "forkly", "logs"), nil
 	}
-	return filepath.Join(home, "Library", "Logs", "Forkly"), nil
 }
 
 func Open(dataDir string) (*Store, error) {
@@ -131,7 +162,7 @@ func Open(dataDir string) (*Store, error) {
 
 func defaultFile() File {
 	return File{
-		Version: Version,
+		Version:  Version,
 		Projects: []ProjectEntry{},
 		Identity: GitIdentity{
 			Name:  DefaultIdentityName,

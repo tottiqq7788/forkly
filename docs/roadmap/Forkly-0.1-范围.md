@@ -4,15 +4,15 @@
 
 ## 做
 
-- macOS 菜单栏客户端 + 本地 Web 控制台
+- macOS 菜单栏 / Windows 系统托盘客户端 + 本地 Web 控制台
 - 新建 / 添加本地项目、初始化 Git
 - 状态、筛选、文本差异、图片预览、二进制元数据
 - 项目文件浏览（目录/版本）与 Markdown 安全预览
 - 工作区 Markdown 所见即所得编辑：自动保存（约 1.5s 防抖）、revision 乐观并发、冲突保留草稿；HEAD / 不可编辑文件只读（预览/源码）
-- macOS Markdown 文档关联：声明为备选编辑器（`LSHandlerRank=Alternate`）；访达打开时走独立本地文件会话（不透明 `fileId`、不创建项目）；首次需用户在「打开方式」中选择 Forkly
+- Markdown 文档关联：声明为备选编辑器；从 Finder 或 Windows 文件管理器打开时走独立本地文件会话（不透明 `fileId`、不创建项目）；首次需用户在「打开方式」中选择 Forkly
 - 按文件保存版本、历史与提交详情
 - 本地分支查看、切换、新建、重命名与安全删除（脏工作区禁止切换）
-- 内置 Git、双架构 DMG、Developer ID 签名与公证
+- 内置 Git、macOS 双架构 DMG、Windows x64/arm64 安装包；macOS 支持 Developer ID 签名与公证
 
 ## 不做
 
@@ -21,7 +21,6 @@
 - 分支合并、强制删除、自动 stash / 强制切换、内置冲突解决
 - 丢弃修改、reset、LFS、AI、自动更新
 - PlantUML 远端渲染（快捷插入已隐藏，后续显式授权）
-- Windows 安装包（仅保留平台接口可编译）
 - 强制改写系统默认 Markdown 打开方式（仅声明可编辑，由用户首次选择）
 
 ## 验收
