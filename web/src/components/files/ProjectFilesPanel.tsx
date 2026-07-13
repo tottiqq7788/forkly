@@ -53,7 +53,6 @@ type NameDialogState = {
 };
 
 type NoticeState = {
-  kind: "success" | "error";
   message: string;
 };
 
@@ -297,9 +296,9 @@ export function ProjectFilesPanel({
     });
   }
 
-  function showNotice(kind: NoticeState["kind"], message: string) {
+  function showError(message: string) {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    setNotice({ kind, message });
+    setNotice({ message });
     noticeTimer.current = setTimeout(() => setNotice(null), 2200);
   }
 
@@ -308,7 +307,7 @@ export function ProjectFilesPanel({
     try {
       await action();
     } catch (error) {
-      showNotice("error", error instanceof Error ? error.message : "操作失败");
+      showError(error instanceof Error ? error.message : "操作失败");
     }
   }
 
@@ -322,7 +321,7 @@ export function ProjectFilesPanel({
 
   async function flushBeforeWrite() {
     if (source !== "worktree") {
-      showNotice("error", "版本视图不可修改");
+      showError("版本视图不可修改");
       return false;
     }
     return flushMarkdown();
@@ -353,10 +352,8 @@ export function ProjectFilesPanel({
         if (parentPath) expandDirs([parentPath]);
         if (kind === "dir") {
           expandDirs([result.entry.path]);
-          showNotice("success", "已新建文件夹");
           return;
         }
-        showNotice("success", "已新建文件");
         await selectFile(result.entry.path);
       },
     });
@@ -387,7 +384,6 @@ export function ProjectFilesPanel({
           setSelection((prev) => ({ ...prev, worktree: { path: "" } }));
           onPathChange?.("");
         }
-        showNotice("success", "已重命名");
       },
     });
   }
@@ -404,15 +400,13 @@ export function ProjectFilesPanel({
       setSelection((prev) => ({ ...prev, worktree: { path: "" } }));
       onPathChange?.("");
     }
-    showNotice("success", "已删除");
   }
 
-  async function copyText(text: string, successMessage: string) {
+  async function copyText(text: string) {
     if (!navigator.clipboard?.writeText) {
       throw new Error("当前浏览器不支持剪贴板写入");
     }
     await navigator.clipboard.writeText(text);
-    showNotice("success", successMessage);
   }
 
   function absolutePathFor(relPath: string) {
@@ -440,11 +434,7 @@ export function ProjectFilesPanel({
         {notice ? (
           <div
             role="status"
-            className={`mx-2 mt-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs ${
-              notice.kind === "success"
-                ? "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)]"
-                : "border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
-            }`}
+            className="mx-2 mt-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
           >
             {notice.message}
           </div>
@@ -517,23 +507,16 @@ export function ProjectFilesPanel({
             onClose={() => setMenu(null)}
             onCreateFile={(parentPath) => openCreateDialog(parentPath, "file")}
             onCreateFolder={(parentPath) => openCreateDialog(parentPath, "dir")}
-            onRefresh={() =>
-              void runMenuAction(async () => {
-                await refreshFiles();
-                showNotice("success", "文件树已刷新");
-              })
-            }
+            onRefresh={() => void runMenuAction(() => refreshFiles())}
             onOpenLocation={(path) =>
               void runMenuAction(async () => {
                 await revealProjectPath(projectID, path);
               })
             }
             onCopyAbsolutePath={(path) =>
-              void runMenuAction(() => copyText(absolutePathFor(path), "已复制绝对路径"))
+              void runMenuAction(() => copyText(absolutePathFor(path)))
             }
-            onCopyRelativePath={(path) =>
-              void runMenuAction(() => copyText(path, "已复制相对路径"))
-            }
+            onCopyRelativePath={(path) => void runMenuAction(() => copyText(path))}
             onRename={openRenameDialog}
             onDelete={(path, entryKind) => void runMenuAction(() => deleteEntry(path, entryKind))}
             onToggleDirectory={(path) => void runMenuAction(() => toggleDir(path))}

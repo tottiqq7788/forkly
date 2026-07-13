@@ -108,7 +108,7 @@ export default function SettingsPage() {
 
       <section>
         <h2 className="font-medium mb-1">关于</h2>
-        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.37 · 本地可视化 Git</p>
+        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.38 · 本地可视化 Git</p>
       </section>
 
       <div className="flex items-center gap-3">

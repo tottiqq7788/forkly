@@ -275,7 +275,10 @@ describe("ProjectFilesPanel selection", () => {
     fireEvent.contextMenu(await screen.findByTitle("a.txt"), { clientX: 32, clientY: 40 });
     await user.click(await screen.findByRole("menuitem", { name: "复制相对路径" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("已复制相对路径");
+    await waitFor(() => {
+      expect(screen.queryByRole("menuitem", { name: "复制相对路径" })).toBeNull();
+    });
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("keeps the head source context menu read-only", async () => {

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowClockwise,
   ArrowsLeftRight,
+  CaretRight,
   FolderSimple,
   GearSix,
   GitBranch,
@@ -12,11 +13,19 @@ import {
   Plus,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { api, DiffResult, FileStatus, Project, SessionMe, StatusSnapshot } from "../api";
+import { api, DiffResult, FileStatus, Project, SessionMe, StatusSnapshot, revealProjectPath } from "../api";
 import { Drawer } from "../Drawer";
 import { ProjectFilesPanel } from "../components/files/ProjectFilesPanel";
 import { useMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { BranchDrawer } from "../components/branches/BranchDrawer";
+import {
+  ChangeTreeContextMenu,
+  type ChangeTreeContextMenuState,
+} from "../components/changes/ChangeTreeContextMenu";
+import {
+  HistoryTreeContextMenu,
+  type HistoryTreeContextMenuState,
+} from "../components/history/HistoryTreeContextMenu";
 import AddProjectPage from "./AddProjectPage";
 
 type ProjectTab = "files" | "changes" | "history";
@@ -71,6 +80,10 @@ export default function ProjectPage() {
   const [hideRulesSaved, setHideRulesSaved] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [filesBranchKey, setFilesBranchKey] = useState("");
+  const [changeCollapsed, setChangeCollapsed] = useState<Set<string>>(() => new Set());
+  const [changeMenu, setChangeMenu] = useState<ChangeTreeContextMenuState | null>(null);
+  const [changeNotice, setChangeNotice] = useState<string | null>(null);
+  const changeNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { flush: flushMarkdown } = useMarkdownSaveGuard();
 
   useEffect(() => {
@@ -93,7 +106,20 @@ export default function ProjectPage() {
     setHideRulesSaved(false);
     setBranchOpen(false);
     setFilesBranchKey("");
+    setChangeCollapsed(new Set());
+    setChangeMenu(null);
+    setChangeNotice(null);
+    if (changeNoticeTimer.current) {
+      clearTimeout(changeNoticeTimer.current);
+      changeNoticeTimer.current = null;
+    }
   }, [id]);
+
+  useEffect(() => {
+    return () => {
+      if (changeNoticeTimer.current) clearTimeout(changeNoticeTimer.current);
+    };
+  }, []);
 
   async function setTab(next: ProjectTab) {
     const ok = await flushMarkdown();
@@ -322,6 +348,10 @@ export default function ProjectPage() {
     () => compactChangeTree(buildChangeTree(files)),
     [files],
   );
+  const changeDirPaths = useMemo(() => collectChangeDirPaths(changeTree), [changeTree]);
+  const changeAllPaths = useMemo(() => collectAllFilePaths(changeTree), [changeTree]);
+  const changeAllSelected =
+    changeAllPaths.length > 0 && changeAllPaths.every((path) => selected.has(path));
 
   useEffect(() => {
     const paths = collectAllFilePaths(changeTree);
@@ -333,9 +363,87 @@ export default function ProjectPage() {
     });
   }, [changeTree, pathFromUrl]);
 
+  useEffect(() => {
+    const valid = new Set(changeDirPaths);
+    setChangeCollapsed((prev) => {
+      const next = new Set([...prev].filter((path) => valid.has(path)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [changeDirPaths]);
+
   function openChangePath(path: string) {
+    const ancestors = ancestorDirPathsForFile(changeTree, path);
+    if (ancestors.length > 0) {
+      setChangeCollapsed((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const dir of ancestors) {
+          if (next.delete(dir)) changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }
     setActivePath(path);
     replaceSelectionParam("path", path);
+  }
+
+  function showChangeError(message: string) {
+    if (changeNoticeTimer.current) clearTimeout(changeNoticeTimer.current);
+    setChangeNotice(message);
+    changeNoticeTimer.current = setTimeout(() => setChangeNotice(null), 2200);
+  }
+
+  async function runChangeMenuAction(action: () => Promise<void> | void) {
+    setChangeMenu(null);
+    try {
+      await action();
+    } catch (error) {
+      showChangeError(error instanceof Error ? error.message : "操作失败");
+    }
+  }
+
+  function absolutePathFor(relPath: string) {
+    const projectPath = project.data?.path || "";
+    if (!projectPath) return relPath;
+    if (!relPath) return projectPath;
+    const sep = projectPath.includes("\\") ? "\\" : "/";
+    return `${projectPath.replace(/[\\/]+$/, "")}${sep}${relPath.split("/").join(sep)}`;
+  }
+
+  async function copyText(text: string) {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error("当前浏览器不支持剪贴板写入");
+    }
+    await navigator.clipboard.writeText(text);
+  }
+
+  function toggleChangePaths(paths: string[]) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allOn = paths.length > 0 && paths.every((p) => next.has(p));
+      if (allOn) {
+        for (const p of paths) next.delete(p);
+      } else {
+        for (const p of paths) next.add(p);
+      }
+      return next;
+    });
+  }
+
+  function toggleChangeDirectory(path: string) {
+    setChangeCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
+  async function refreshChanges() {
+    await Promise.all([
+      status.refetch({ cancelRefetch: false }),
+      activePath ? diff.refetch({ cancelRefetch: false }) : Promise.resolve(),
+    ]);
   }
 
   const commit = useMutation({
@@ -518,7 +626,22 @@ export default function ProjectPage() {
                 保存版本
               </button>
             </div>
-            <div className="overflow-auto flex-1 py-1">
+            <div
+              className="overflow-auto flex-1 py-1"
+              onContextMenu={(event) => {
+                if ((event.target as HTMLElement).closest("[data-change-tree-node='true']")) return;
+                event.preventDefault();
+                setChangeMenu({ x: event.clientX, y: event.clientY, target: { kind: "root" } });
+              }}
+            >
+              {changeNotice ? (
+                <div
+                  role="status"
+                  className="mx-2 mb-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
+                >
+                  {changeNotice}
+                </div>
+              ) : null}
               {files.length === 0 ? (
                 <p className="p-4 text-sm text-[var(--color-text-secondary)]">没有待保存的修改</p>
               ) : (
@@ -527,19 +650,43 @@ export default function ProjectPage() {
                   nodes={changeTree}
                   selected={selected}
                   activePath={activePath}
-                  onTogglePaths={(paths) => {
-                    const next = new Set(selected);
-                    const allOn = paths.length > 0 && paths.every((p) => next.has(p));
-                    if (allOn) {
-                      for (const p of paths) next.delete(p);
-                    } else {
-                      for (const p of paths) next.add(p);
-                    }
-                    setSelected(next);
-                  }}
+                  collapsed={changeCollapsed}
+                  onTogglePaths={toggleChangePaths}
+                  onToggleDirectory={toggleChangeDirectory}
                   onOpen={openChangePath}
+                  onOpenContextMenu={setChangeMenu}
                 />
               )}
+              {changeMenu ? (
+                <ChangeTreeContextMenu
+                  state={changeMenu}
+                  allSelected={changeAllSelected}
+                  anyCollapsed={changeCollapsed.size > 0}
+                  onClose={() => setChangeMenu(null)}
+                  onRefresh={() => void runChangeMenuAction(refreshChanges)}
+                  onToggleSelectAll={() => void runChangeMenuAction(() => toggleChangePaths(changeAllPaths))}
+                  onExpandAll={() => void runChangeMenuAction(() => setChangeCollapsed(new Set()))}
+                  onCollapseAll={() =>
+                    void runChangeMenuAction(() => setChangeCollapsed(new Set(changeDirPaths)))
+                  }
+                  onOpenLocation={(path) =>
+                    void runChangeMenuAction(async () => {
+                      await revealProjectPath(id, path);
+                    })
+                  }
+                  onCopyAbsolutePath={(path) =>
+                    void runChangeMenuAction(() => copyText(absolutePathFor(path)))
+                  }
+                  onCopyRelativePath={(path) => void runChangeMenuAction(() => copyText(path))}
+                  onOpenDiff={(path) => void runChangeMenuAction(() => openChangePath(path))}
+                  onToggleSelect={(paths) => void runChangeMenuAction(() => toggleChangePaths(paths))}
+                  onToggleDirectory={(path) => void runChangeMenuAction(() => toggleChangeDirectory(path))}
+                  collectDirectoryPaths={(path) => {
+                    const node = findChangeNode(changeTree, path);
+                    return node ? collectFilePaths(node) : [];
+                  }}
+                />
+              ) : null}
             </div>
             <div className="border-t border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
               已选择 {selected.size} 个文件
@@ -556,7 +703,12 @@ export default function ProjectPage() {
           </section>
         </div>
       ) : (
-        <ProjectHistoryPanel projectID={id} preferredSha={shaFromUrl} onShaChange={(sha) => replaceSelectionParam("sha", sha)} />
+        <ProjectHistoryPanel
+          projectID={id}
+          projectPath={project.data?.path || ""}
+          preferredSha={shaFromUrl}
+          onShaChange={(sha) => replaceSelectionParam("sha", sha)}
+        />
       )}
 
       {commitOpen && (
@@ -869,22 +1021,43 @@ type HistoryTreeNode =
 
 function ProjectHistoryPanel({
   projectID,
+  projectPath = "",
   preferredSha = "",
   onShaChange,
 }: {
   projectID: string;
+  projectPath?: string;
   preferredSha?: string;
   onShaChange?: (sha: string) => void;
 }) {
+  const qc = useQueryClient();
   const [selected, setSelected] = useState("");
   const [activeFile, setActiveFile] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [menu, setMenu] = useState<HistoryTreeContextMenuState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     setSelected("");
     setActiveFile("");
+    setCollapsed(new Set());
+    setMenu(null);
+    setNotice(null);
+    if (noticeTimer.current) {
+      clearTimeout(noticeTimer.current);
+      noticeTimer.current = null;
+    }
   }, [projectID]);
   useEffect(() => {
     setActiveFile("");
   }, [selected]);
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    };
+  }, []);
+
   const history = useQuery({
     queryKey: ["history", projectID],
     queryFn: () => api<{ commits: Commit[] }>(`/local-api/v1/projects/${projectID}/history`),
@@ -906,6 +1079,7 @@ function ProjectHistoryPanel({
 
   const commits = history.data?.commits;
   const historyTree = useMemo(() => buildHistoryTree(commits ?? []), [commits]);
+  const groupKeys = useMemo(() => collectHistoryGroupKeys(historyTree), [historyTree]);
 
   useEffect(() => {
     const list = commits ?? [];
@@ -918,13 +1092,98 @@ function ProjectHistoryPanel({
     });
   }, [commits, historyTree, preferredSha]);
 
+  useEffect(() => {
+    const valid = new Set(groupKeys);
+    setCollapsed((prev) => {
+      const next = new Set([...prev].filter((key) => valid.has(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [groupKeys]);
+
   function selectCommit(sha: string) {
+    const ancestors = ancestorGroupKeysForSha(historyTree, sha);
+    if (ancestors.length > 0) {
+      setCollapsed((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const key of ancestors) {
+          if (next.delete(key)) changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }
     setSelected(sha);
     onShaChange?.(sha);
   }
+
+  function showError(message: string) {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = setTimeout(() => setNotice(null), 2200);
+  }
+
+  async function runMenuAction(action: () => Promise<void> | void) {
+    setMenu(null);
+    try {
+      await action();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "操作失败");
+    }
+  }
+
+  function absolutePathFor(relPath: string) {
+    if (!projectPath) return relPath;
+    if (!relPath) return projectPath;
+    const sep = projectPath.includes("\\") ? "\\" : "/";
+    return `${projectPath.replace(/[\\/]+$/, "")}${sep}${relPath.split("/").join(sep)}`;
+  }
+
+  async function copyText(text: string) {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error("当前浏览器不支持剪贴板写入");
+    }
+    await navigator.clipboard.writeText(text);
+  }
+
+  function toggleGroup(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function refreshHistory() {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["history", projectID] }),
+      selected
+        ? qc.invalidateQueries({ queryKey: ["commit", projectID, selected] })
+        : Promise.resolve(),
+      selected && activeFile
+        ? qc.invalidateQueries({ queryKey: ["commit-diff", projectID, selected, activeFile] })
+        : Promise.resolve(),
+    ]);
+  }
+
   return (
     <div className="flex flex-1 min-h-0">
-      <div className="w-[240px] border-r border-[var(--color-border)] overflow-auto py-1">
+      <div
+        className="w-[240px] border-r border-[var(--color-border)] overflow-auto py-1"
+        onContextMenu={(event) => {
+          if ((event.target as HTMLElement).closest("[data-history-tree-node='true']")) return;
+          event.preventDefault();
+          setMenu({ x: event.clientX, y: event.clientY, target: { kind: "root" } });
+        }}
+      >
+        {notice ? (
+          <div
+            role="status"
+            className="mx-2 mb-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
+          >
+            {notice}
+          </div>
+        ) : null}
         {history.isLoading && <p className="p-4 text-sm text-[var(--color-text-secondary)]">加载历史…</p>}
         {!history.isLoading && (commits?.length ?? 0) === 0 && (
           <p className="p-4 text-sm text-[var(--color-text-secondary)]">还没有任何版本</p>
@@ -938,11 +1197,33 @@ function ProjectHistoryPanel({
                 isLast={index === historyTree.length - 1}
                 ancestorContinues={[]}
                 selected={selected}
+                collapsed={collapsed}
                 onSelect={selectCommit}
+                onToggleGroup={toggleGroup}
+                onOpenContextMenu={setMenu}
               />
             ))}
           </div>
         )}
+        {menu ? (
+          <HistoryTreeContextMenu
+            state={menu}
+            anyCollapsed={collapsed.size > 0}
+            onClose={() => setMenu(null)}
+            onRefresh={() => void runMenuAction(refreshHistory)}
+            onExpandAll={() => void runMenuAction(() => setCollapsed(new Set()))}
+            onCollapseAll={() => void runMenuAction(() => setCollapsed(new Set(groupKeys)))}
+            onOpenLocation={() =>
+              void runMenuAction(async () => {
+                await revealProjectPath(projectID, "");
+              })
+            }
+            onCopyProjectPath={() => void runMenuAction(() => copyText(absolutePathFor("")))}
+            onSelectCommit={(sha) => void runMenuAction(() => selectCommit(sha))}
+            onToggleGroup={(key) => void runMenuAction(() => toggleGroup(key))}
+            onCopyText={(text) => void runMenuAction(() => copyText(text))}
+          />
+        ) : null}
       </div>
       <div className="flex-1 p-5 overflow-auto">
         {!selected && !history.isLoading && (
@@ -1068,6 +1349,47 @@ function firstHistoryCommitSha(nodes: HistoryTreeNode[]): string {
   return "";
 }
 
+function collectHistoryGroupKeys(nodes: HistoryTreeNode[]): string[] {
+  const out: string[] = [];
+  function walk(node: HistoryTreeNode) {
+    if (node.kind !== "group") return;
+    out.push(node.key);
+    for (const child of node.children) walk(child);
+  }
+  for (const node of nodes) walk(node);
+  return out;
+}
+
+function historyGroupCopyValue(key: string, label: string): string {
+  if (key.startsWith("y:") || key.startsWith("m:") || key.startsWith("d:")) {
+    return key.slice(2);
+  }
+  if (key.startsWith("a:")) {
+    const rest = key.slice(2);
+    const match = rest.match(/^\d{4}-\d{2}-\d{2}:(.*)$/);
+    if (match?.[1]) return match[1];
+  }
+  return label;
+}
+
+function ancestorGroupKeysForSha(nodes: HistoryTreeNode[], sha: string): string[] {
+  const found: string[] = [];
+  function walk(list: HistoryTreeNode[], ancestors: string[]): boolean {
+    for (const node of list) {
+      if (node.kind === "commit" && node.commit.sha === sha) {
+        found.push(...ancestors);
+        return true;
+      }
+      if (node.kind === "group" && walk(node.children, [...ancestors, node.key])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  walk(nodes, []);
+  return found;
+}
+
 function historyDateParts(iso: string): { year: string; month: string; day: string; time: string } {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) {
@@ -1089,35 +1411,77 @@ function HistoryTreeNodeRow({
   isLast,
   ancestorContinues,
   selected,
+  collapsed,
   onSelect,
+  onToggleGroup,
+  onOpenContextMenu,
 }: {
   node: HistoryTreeNode;
   isLast: boolean;
   ancestorContinues: boolean[];
   selected: string;
+  collapsed: Set<string>;
   onSelect: (sha: string) => void;
+  onToggleGroup: (key: string) => void;
+  onOpenContextMenu: (state: HistoryTreeContextMenuState) => void;
 }) {
   if (node.kind === "group") {
+    const isExpanded = !collapsed.has(node.key);
     return (
       <div>
-        <div className="flex items-stretch gap-1 px-1 text-xs text-[var(--color-text-secondary)]">
+        <div
+          data-history-tree-node="true"
+          className="flex items-stretch gap-1 px-1 text-xs text-[var(--color-text-secondary)]"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenContextMenu({
+              x: event.clientX,
+              y: event.clientY,
+              target: {
+                kind: "group",
+                key: node.key,
+                label: node.label,
+                copyValue: historyGroupCopyValue(node.key, node.label),
+                isExpanded,
+                latestSha: firstHistoryCommitSha(node.children),
+              },
+            });
+          }}
+        >
           <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
-          <div className="flex min-w-0 flex-1 items-center py-0.5">
+          <button
+            type="button"
+            className="min-w-0 flex-1 flex items-center gap-1 text-left py-0.5 cursor-pointer"
+            onClick={() => onToggleGroup(node.key)}
+          >
+            <CaretRight
+              size={12}
+              className={`shrink-0 text-[var(--color-text-tertiary)] transition-transform ${
+                isExpanded ? "rotate-90" : ""
+              }`}
+              aria-hidden
+            />
             <span className="min-w-0 flex-1 truncate font-medium" title={node.label}>
               {node.label}
             </span>
-          </div>
+          </button>
         </div>
-        {node.children.map((child, index) => (
-          <HistoryTreeNodeRow
-            key={child.key}
-            node={child}
-            isLast={index === node.children.length - 1}
-            ancestorContinues={[...ancestorContinues, !isLast]}
-            selected={selected}
-            onSelect={onSelect}
-          />
-        ))}
+        {isExpanded
+          ? node.children.map((child, index) => (
+              <HistoryTreeNodeRow
+                key={child.key}
+                node={child}
+                isLast={index === node.children.length - 1}
+                ancestorContinues={[...ancestorContinues, !isLast]}
+                selected={selected}
+                collapsed={collapsed}
+                onSelect={onSelect}
+                onToggleGroup={onToggleGroup}
+                onOpenContextMenu={onOpenContextMenu}
+              />
+            ))
+          : null}
       </div>
     );
   }
@@ -1125,9 +1489,19 @@ function HistoryTreeNodeRow({
   const active = selected === node.commit.sha;
   return (
     <div
+      data-history-tree-node="true"
       className={`flex items-stretch gap-1 px-1 rounded-[var(--radius-sm)] ${
         active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
       }`}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          target: { kind: "commit", commit: node.commit },
+        });
+      }}
     >
       <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
       <button
@@ -1272,6 +1646,44 @@ function collectAllFilePaths(nodes: ChangeTreeNode[]): string[] {
   return nodes.flatMap(collectFilePaths);
 }
 
+function collectChangeDirPaths(nodes: ChangeTreeNode[]): string[] {
+  const out: string[] = [];
+  function walk(node: ChangeTreeNode) {
+    if (node.kind !== "dir") return;
+    out.push(node.path);
+    for (const child of node.children) walk(child);
+  }
+  for (const node of nodes) walk(node);
+  return out;
+}
+
+function findChangeNode(nodes: ChangeTreeNode[], path: string): ChangeTreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const nested = findChangeNode(node.children, path);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function ancestorDirPathsForFile(nodes: ChangeTreeNode[], filePath: string): string[] {
+  const found: string[] = [];
+  function walk(list: ChangeTreeNode[], ancestors: string[]): boolean {
+    for (const node of list) {
+      if (node.kind === "file" && node.path === filePath) {
+        found.push(...ancestors);
+        return true;
+      }
+      if (node.kind === "dir" && walk(node.children, [...ancestors, node.path])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  walk(nodes, []);
+  return found;
+}
+
 function selectionState(paths: string[], selected: Set<string>): { checked: boolean; indeterminate: boolean } {
   if (paths.length === 0) return { checked: false, indeterminate: false };
   const n = paths.filter((p) => selected.has(p)).length;
@@ -1340,22 +1752,36 @@ function ChangeTreeView({
   nodes,
   selected,
   activePath,
+  collapsed,
   onTogglePaths,
+  onToggleDirectory,
   onOpen,
+  onOpenContextMenu,
 }: {
   rootName: string;
   nodes: ChangeTreeNode[];
   selected: Set<string>;
   activePath: string;
+  collapsed: Set<string>;
   onTogglePaths: (paths: string[]) => void;
+  onToggleDirectory: (path: string) => void;
   onOpen: (path: string) => void;
+  onOpenContextMenu: (state: ChangeTreeContextMenuState) => void;
 }) {
   const allPaths = collectAllFilePaths(nodes);
   const rootSel = selectionState(allPaths, selected);
 
   return (
     <div className="px-2">
-      <div className="group flex items-center gap-1 px-1 py-1 text-xs font-medium text-[var(--color-text-secondary)]">
+      <div
+        data-change-tree-node="true"
+        className="group flex items-center gap-1 px-1 py-1 text-xs font-medium text-[var(--color-text-secondary)]"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenContextMenu({ x: event.clientX, y: event.clientY, target: { kind: "root" } });
+        }}
+      >
         <span className="min-w-0 flex-1 truncate" title={rootName}>
           {rootName}/
         </span>
@@ -1374,8 +1800,11 @@ function ChangeTreeView({
           ancestorContinues={[]}
           selected={selected}
           activePath={activePath}
+          collapsed={collapsed}
           onTogglePaths={onTogglePaths}
+          onToggleDirectory={onToggleDirectory}
           onOpen={onOpen}
+          onOpenContextMenu={onOpenContextMenu}
         />
       ))}
     </div>
@@ -1388,28 +1817,66 @@ function ChangeTreeNodeRow({
   ancestorContinues,
   selected,
   activePath,
+  collapsed,
   onTogglePaths,
+  onToggleDirectory,
   onOpen,
+  onOpenContextMenu,
 }: {
   node: ChangeTreeNode;
   isLast: boolean;
   ancestorContinues: boolean[];
   selected: Set<string>;
   activePath: string;
+  collapsed: Set<string>;
   onTogglePaths: (paths: string[]) => void;
+  onToggleDirectory: (path: string) => void;
   onOpen: (path: string) => void;
+  onOpenContextMenu: (state: ChangeTreeContextMenuState) => void;
 }) {
   if (node.kind === "dir") {
     const paths = collectFilePaths(node);
     const dirSel = selectionState(paths, selected);
+    const isExpanded = !collapsed.has(node.path);
     return (
       <div>
-        <div className="group flex items-stretch gap-1 px-1 text-xs text-[var(--color-text-secondary)]">
+        <div
+          data-change-tree-node="true"
+          className="group flex items-stretch gap-1 px-1 text-xs text-[var(--color-text-secondary)]"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenContextMenu({
+              x: event.clientX,
+              y: event.clientY,
+              target: {
+                kind: "directory",
+                path: node.path,
+                name: node.name,
+                isExpanded,
+                selected: dirSel.checked,
+              },
+            });
+          }}
+        >
           <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
           <div className="flex min-w-0 flex-1 items-center gap-1 py-0.5">
-            <span className="min-w-0 flex-1 truncate font-mono" title={`${node.path}/`}>
-              {node.name}/
-            </span>
+            <button
+              type="button"
+              className="min-w-0 flex-1 flex items-center gap-1 text-left cursor-pointer"
+              onClick={() => onToggleDirectory(node.path)}
+            >
+              <CaretRight
+                size={12}
+                className={`shrink-0 text-[var(--color-text-tertiary)] transition-transform ${
+                  isExpanded ? "rotate-90" : ""
+                }`}
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1 truncate font-mono" title={`${node.path}/`}>
+                {node.name}/
+              </span>
+            </button>
             <HoverSelectCheckbox
               checked={dirSel.checked}
               indeterminate={dirSel.indeterminate}
@@ -1418,18 +1885,23 @@ function ChangeTreeNodeRow({
             />
           </div>
         </div>
-        {node.children.map((child, index) => (
-          <ChangeTreeNodeRow
-            key={`${child.kind}:${child.path}`}
-            node={child}
-            isLast={index === node.children.length - 1}
-            ancestorContinues={[...ancestorContinues, !isLast]}
-            selected={selected}
-            activePath={activePath}
-            onTogglePaths={onTogglePaths}
-            onOpen={onOpen}
-          />
-        ))}
+        {isExpanded
+          ? node.children.map((child, index) => (
+              <ChangeTreeNodeRow
+                key={`${child.kind}:${child.path}`}
+                node={child}
+                isLast={index === node.children.length - 1}
+                ancestorContinues={[...ancestorContinues, !isLast]}
+                selected={selected}
+                activePath={activePath}
+                collapsed={collapsed}
+                onTogglePaths={onTogglePaths}
+                onToggleDirectory={onToggleDirectory}
+                onOpen={onOpen}
+                onOpenContextMenu={onOpenContextMenu}
+              />
+            ))
+          : null}
       </div>
     );
   }
@@ -1441,9 +1913,25 @@ function ChangeTreeNodeRow({
 
   return (
     <div
+      data-change-tree-node="true"
       className={`group flex items-stretch gap-1 px-1 rounded-[var(--radius-sm)] ${
         active ? "bg-[var(--color-surface-active)]" : "hover:bg-[var(--color-surface-hover)]"
       }`}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          target: {
+            kind: "file",
+            path: file.path,
+            name: node.name,
+            file,
+            selected: checked,
+          },
+        });
+      }}
     >
       <TreeBranchGuides isLast={isLast} ancestorContinues={ancestorContinues} />
       <div className="flex min-w-0 flex-1 items-center gap-1 py-0.5">
