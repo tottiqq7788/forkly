@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	// MaxEditBytes is the hard limit for Markdown edits (1 MiB).
+	// MaxEditBytes is the hard limit for in-app text edits (1 MiB).
 	MaxEditBytes = 1 << 20
 	// MaxAssetUploadBytes caps pasted/dropped image uploads.
 	MaxAssetUploadBytes = 8 << 20
@@ -307,6 +307,9 @@ func (e *Executor) WriteAsset(repo, markdownRel, preferredName string, data []by
 	}
 	if markdownRel == "" {
 		return WriteAssetResult{}, fmt.Errorf("缺少 path")
+	}
+	if !isMarkdownRel(markdownRel) {
+		return WriteAssetResult{}, fmt.Errorf("仅支持为 Markdown 文档上传图片资源")
 	}
 	if int64(len(data)) == 0 {
 		return WriteAssetResult{}, fmt.Errorf("空文件")

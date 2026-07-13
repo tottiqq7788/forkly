@@ -296,11 +296,11 @@ export function ProjectFilesPanel({
         showError("二进制文件暂不支持编辑");
         return;
       }
-      if (file.kind === "too_large" || file.truncated || !file.editable) {
+      if (file.kind === "too_large" || file.truncated) {
         showError("文件过大暂不支持编辑");
         return;
       }
-      if (file.kind !== "text") {
+      if (file.kind !== "text" || !file.editable) {
         showError("该文件暂不支持编辑");
         return;
       }

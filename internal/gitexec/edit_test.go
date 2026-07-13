@@ -269,3 +269,16 @@ func TestWriteAssetRejectsSVGAndOversize(t *testing.T) {
 		t.Fatal("oversize should be rejected")
 	}
 }
+
+func TestWriteAssetRejectsNonMarkdownParent(t *testing.T) {
+	repo := t.TempDir()
+	initRepo(t, repo)
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("plain\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	png := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 1, 2, 3}
+	e := testExecutor(t)
+	if _, err := e.WriteAsset(repo, "notes.txt", "shot.png", png); err == nil {
+		t.Fatal("asset upload beside non-markdown should be rejected")
+	}
+}
