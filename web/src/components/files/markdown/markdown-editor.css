@@ -349,33 +349,76 @@
   padding: 8px 6px 16px;
 }
 
-.forkly-md-toc-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-secondary);
+.forkly-md-toc-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
   border-radius: var(--radius-sm);
-  padding: 5px 8px;
-  font-size: 12px;
-  line-height: 1.35;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--color-text-secondary);
 }
 
-.forkly-md-toc-item:hover {
+.forkly-md-toc-row:hover {
   background: color-mix(in srgb, var(--color-surface) 80%, transparent);
   color: var(--color-text);
 }
 
-.forkly-md-toc-item.is-active {
+.forkly-md-toc-row.is-active {
   background: var(--color-surface);
   color: var(--color-text);
   font-weight: 600;
   box-shadow: inset 3px 0 0 0 var(--color-accent);
+}
+
+.forkly-md-toc-caret,
+.forkly-md-toc-caret-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.forkly-md-toc-caret {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.forkly-md-toc-caret:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface-hover) 70%, transparent);
+}
+
+.forkly-md-toc-caret-icon {
+  transition: transform 0.12s ease;
+}
+
+.forkly-md-toc-caret-icon.is-expanded {
+  transform: rotate(90deg);
+}
+
+.forkly-md-toc-item {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: var(--radius-sm);
+  padding: 5px 6px 5px 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .forkly-md-editor-main {
