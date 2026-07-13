@@ -28,6 +28,7 @@ import { useMarkdownSaveGuard } from "./markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "./markdown/isMarkdown";
 import type { MarkdownViewerMode } from "./markdown/MarkdownDocumentView";
 import { isGitMetaPath, parentDirsOf } from "./markdown/markdownPath";
+import { SegmentedButton, SegmentedButtonGroup } from "../ui/SegmentedButton";
 
 type Props = {
   projectID: string;
@@ -424,12 +425,16 @@ export function ProjectFilesPanel({
     <div className="flex flex-1 min-h-0">
       <section className="relative w-[340px] border-r border-[var(--color-border)] flex flex-col min-h-0">
         <div className="p-2 border-b border-[var(--color-border)] flex gap-1">
-          <SourceButton active={source === "worktree"} onClick={() => void switchSource("worktree")}>
+          <SegmentedButton
+            compact
+            active={source === "worktree"}
+            onClick={() => void switchSource("worktree")}
+          >
             目录
-          </SourceButton>
-          <SourceButton active={source === "head"} onClick={() => void switchSource("head")}>
+          </SegmentedButton>
+          <SegmentedButton compact active={source === "head"} onClick={() => void switchSource("head")}>
             版本
-          </SourceButton>
+          </SegmentedButton>
         </div>
         {notice ? (
           <div
@@ -483,22 +488,18 @@ export function ProjectFilesPanel({
           )}
         </div>
         {activeIsMarkdown ? (
-          <div
-            className="shrink-0 border-t border-[var(--color-border)] p-2 flex gap-1"
-            role="group"
-            aria-label="Markdown 显示模式"
-          >
-            <ModeButton
+          <SegmentedButtonGroup label="Markdown 显示模式">
+            <SegmentedButton
               active={mdViewMode === "preview"}
               disabled={previewDisabled}
               onClick={() => setMdViewMode("preview")}
             >
               预览
-            </ModeButton>
-            <ModeButton active={mdViewMode === "source"} onClick={() => setMdViewMode("source")}>
+            </SegmentedButton>
+            <SegmentedButton active={mdViewMode === "source"} onClick={() => setMdViewMode("source")}>
               源码
-            </ModeButton>
-          </div>
+            </SegmentedButton>
+          </SegmentedButtonGroup>
         ) : null}
         {menu ? (
           <ProjectFilesContextMenu
@@ -569,58 +570,6 @@ export function ProjectFilesPanel({
         </div>
       </section>
     </div>
-  );
-}
-
-function SourceButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-1 rounded-[var(--radius-sm)] px-2 py-1 text-xs transition-colors ${
-        active
-          ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
-          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ModeButton({
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={`flex-1 rounded-[var(--radius-sm)] px-2 py-1.5 text-xs transition-colors ${
-        active
-          ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
-          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
-      } disabled:opacity-40 disabled:cursor-not-allowed`}
-    >
-      {children}
-    </button>
   );
 }
 

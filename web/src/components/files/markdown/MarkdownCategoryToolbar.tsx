@@ -76,9 +76,20 @@ type ToolCategory = {
 
 type Props = {
   onCommand: (cmd: FormatCommand) => void;
+  /** When true, disable WYSIWYG-only format commands (keep undo/redo/find). */
+  sourceMode?: boolean;
   findOpen?: boolean;
   findQuery?: string;
 };
+
+const SOURCE_MODE_ALLOWED = new Set<FormatCommand>([
+  "undo",
+  "redo",
+  "find:open",
+  "find:previous",
+  "find:next",
+  "find:replace",
+]);
 
 const CLOSE_DELAY_MS = 160;
 const FLYOUT_MAX_ITEMS_PER_ROW = 4;
@@ -277,13 +288,24 @@ function chunkItems(items: ToolItem[]): ToolItem[][] {
 
 export function MarkdownCategoryToolbar({
   onCommand,
+  sourceMode = false,
   findOpen = false,
 }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const categories = buildCategories();
+  const categories = buildCategories().map((cat) => {
+    if (!sourceMode) return cat;
+    if (cat.id === "find" || cat.id === "history") return cat;
+    return {
+      ...cat,
+      directCommand: undefined,
+      items: cat.items.map((item) =>
+        SOURCE_MODE_ALLOWED.has(item.command) ? item : { ...item, disabled: true },
+      ),
+    };
+  });
 
   function clearCloseTimer() {
     if (closeTimer.current != null) {

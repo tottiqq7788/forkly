@@ -8,12 +8,20 @@ const fetchSessionMe = vi.fn();
 const fetchFileContent = vi.fn();
 const fetchLocalFileContent = vi.fn();
 const openLocalRelativeFile = vi.fn();
+const putFileContent = vi.fn();
+const putLocalFileContent = vi.fn();
 const apiMock = vi.fn();
 const editorUndo = vi.fn();
 const editorRedo = vi.fn();
 const editorFormat = vi.fn();
 const editorUpdateParagraph = vi.fn();
 const editorFind = vi.fn();
+const editorReplaceContent = vi.fn();
+const editorSetCursorByOffset = vi.fn();
+const sourceUndo = vi.fn();
+const sourceRedo = vi.fn();
+const sourceFind = vi.fn();
+let fakeMarkdown = "# Hello";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -23,6 +31,8 @@ vi.mock("../api", async () => {
     fetchFileContent: (...args: unknown[]) => fetchFileContent(...args),
     fetchLocalFileContent: (...args: unknown[]) => fetchLocalFileContent(...args),
     openLocalRelativeFile: (...args: unknown[]) => openLocalRelativeFile(...args),
+    putFileContent: (...args: unknown[]) => putFileContent(...args),
+    putLocalFileContent: (...args: unknown[]) => putLocalFileContent(...args),
     api: (...args: unknown[]) => apiMock(...args),
   };
 });
@@ -34,16 +44,18 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
       onTocChange,
       onReady,
       onOpenPath,
+      hidden,
     }: {
       onTocChange?: (toc: { content: string; lvl: number; slug: string; githubSlug: string }[]) => void;
       onReady?: () => void;
       onOpenPath?: (path: string) => void;
+      hidden?: boolean;
     },
     ref: React.Ref<unknown>,
   ) {
     React.useImperativeHandle(ref, () => ({
       flush: () => undefined,
-      getMarkdown: () => "# Hello",
+      getMarkdown: () => fakeMarkdown,
       format: (...args: unknown[]) => editorFormat(...args),
       updateParagraph: (...args: unknown[]) => editorUpdateParagraph(...args),
       undo: (...args: unknown[]) => editorUndo(...args),
@@ -56,14 +68,31 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
       setContent: () => undefined,
       getTOC: () => [{ content: "Hello", lvl: 1, slug: "s1", githubSlug: "hello" }],
       scrollToHeading: () => true,
+      getSelectionSnapshot: () => ({ kind: "selection" }),
+      getCursorOffset: () => ({
+        anchor: { line: 0, ch: 1 },
+        focus: { line: 0, ch: 1 },
+      }),
+      replaceContent: (...args: unknown[]) => {
+        fakeMarkdown = String(args[0] ?? "");
+        return editorReplaceContent(...args);
+      },
+      setCursorByOffset: (...args: unknown[]) => editorSetCursorByOffset(...args),
     }));
     React.useEffect(() => {
       onTocChange?.([{ content: "Hello", lvl: 1, slug: "s1", githubSlug: "hello" }]);
       onReady?.();
-    }, [onTocChange, onReady]);
+      // Call once on mount; parent callbacks are stabilized in Workspace.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     return React.createElement(
       "div",
-      { "data-testid": "fake-editor", className: "forkly-markdown-editor" },
+      {
+        "data-testid": "fake-editor",
+        className: "forkly-markdown-editor",
+        style: hidden ? { display: "none" } : undefined,
+        "aria-hidden": hidden || undefined,
+      },
       "editor",
       React.createElement(
         "button",
@@ -73,6 +102,62 @@ vi.mock("../components/files/markdown/MarkdownEditorView", async () => {
     );
   });
   return { MarkdownEditorView: Fake };
+});
+
+vi.mock("../components/files/markdown/MarkdownSourceEditorView", async () => {
+  const React = await import("react");
+  const Fake = React.forwardRef(function Fake(
+    {
+      markdown,
+      onChange,
+      onReady,
+    }: {
+      markdown: string;
+      onChange?: () => void;
+      onReady?: () => void;
+    },
+    ref: React.Ref<unknown>,
+  ) {
+    const [value, setValue] = React.useState(markdown);
+    const valueRef = React.useRef(value);
+    valueRef.current = value;
+    React.useImperativeHandle(ref, () => ({
+      getValue: () => valueRef.current,
+      setValue: (next: string) => {
+        setValue(next);
+        valueRef.current = next;
+      },
+      getIndexCursor: () => ({
+        anchor: { line: 0, ch: 0 },
+        focus: { line: 0, ch: 0 },
+      }),
+      setIndexCursor: () => undefined,
+      focus: () => undefined,
+      undo: (...args: unknown[]) => sourceUndo(...args),
+      redo: (...args: unknown[]) => sourceRedo(...args),
+      search: () => ({ matches: [], index: -1 }),
+      find: (...args: unknown[]) => sourceFind(...args),
+      replace: () => ({ matches: [], index: -1 }),
+      scrollToLine: () => undefined,
+      heightAtLine: () => 0,
+    }));
+    React.useEffect(() => {
+      onReady?.();
+      // Mount callback once; parent may pass a new inline function each render.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return React.createElement("textarea", {
+      "data-testid": "markdown-source-editor",
+      value,
+      onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const next = e.target.value;
+        valueRef.current = next;
+        setValue(next);
+        onChange?.();
+      },
+    });
+  });
+  return { MarkdownSourceEditorView: Fake, default: Fake };
 });
 
 const { default: MarkdownEditorPage } = await import("./MarkdownEditorPage");
@@ -125,17 +210,30 @@ function renderLocalAt(path: string) {
 describe("MarkdownEditorPage", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    fakeMarkdown = "# Hello";
     fetchSessionMe.mockReset();
     fetchFileContent.mockReset();
     fetchLocalFileContent.mockReset();
     openLocalRelativeFile.mockReset();
+    putFileContent.mockReset();
+    putLocalFileContent.mockReset();
     apiMock.mockReset();
     editorUndo.mockReset();
     editorRedo.mockReset();
     editorFormat.mockReset();
     editorUpdateParagraph.mockReset();
     editorFind.mockReset();
+    editorReplaceContent.mockReset();
+    editorSetCursorByOffset.mockReset();
+    sourceUndo.mockReset();
+    sourceRedo.mockReset();
+    sourceFind.mockReset();
     editorFind.mockReturnValue({ matches: [], index: -1 });
+    editorReplaceContent.mockReturnValue(true);
+    editorSetCursorByOffset.mockReturnValue(true);
+    sourceFind.mockReturnValue({ matches: [], index: -1 });
+    putFileContent.mockResolvedValue({ revision: "abc2" });
+    putLocalFileContent.mockResolvedValue({ revision: "local-rev-2" });
     fetchSessionMe.mockResolvedValue({ user: "dev" });
     apiMock.mockResolvedValue({ id: "p1", name: "demo" });
   });
@@ -355,5 +453,85 @@ describe("MarkdownEditorPage", () => {
       expect(openLocalRelativeFile).toHaveBeenCalledWith("lf1", "docs/next.md");
       expect(open).toHaveBeenCalledWith("/editor/local/lf2", "_blank", "noopener,noreferrer");
     });
+  });
+
+  it("switches between preview and source mode with replaceContent handoff", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "源码" }));
+    const source = await screen.findByTestId("markdown-source-editor");
+    expect(source).toBeInTheDocument();
+    expect(screen.getByTestId("fake-editor")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: "源码" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(source, { target: { value: "# Hello\n\nedited" } });
+    fireEvent.click(screen.getByRole("button", { name: "预览" }));
+
+    await waitFor(() => {
+      expect(editorReplaceContent).toHaveBeenCalledWith("# Hello\n\nedited", { kind: "selection" });
+      expect(editorSetCursorByOffset).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId("markdown-source-editor")).toBeNull();
+    expect(screen.getByTestId("fake-editor")).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("does not mark dirty when peeking source mode without edits", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    expect(await screen.findByRole("status", { name: "已保存" })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "源码" }));
+    expect(await screen.findByTestId("markdown-source-editor")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "预览" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("markdown-source-editor")).toBeNull();
+    });
+    expect(editorReplaceContent).toHaveBeenCalledWith("# Hello", { kind: "selection" });
+    expect(screen.getByRole("status", { name: "已保存" })).toBeInTheDocument();
+    expect(putFileContent).not.toHaveBeenCalled();
+  });
+
+  it("routes undo shortcuts to the source editor while in source mode", async () => {
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    fireEvent.click(await screen.findByRole("button", { name: "源码" }));
+    expect(await screen.findByTestId("markdown-source-editor")).toBeInTheDocument();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true }));
+    expect(sourceUndo).toHaveBeenCalledTimes(1);
+    expect(editorUndo).not.toHaveBeenCalled();
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true }),
+    );
+    expect(sourceRedo).toHaveBeenCalledTimes(1);
   });
 });

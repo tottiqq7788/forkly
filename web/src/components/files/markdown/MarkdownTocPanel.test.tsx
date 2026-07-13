@@ -149,4 +149,34 @@ describe("MarkdownTocPanel", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "复制标题文本" }));
     expect(await screen.findByRole("status")).toHaveTextContent("denied");
   });
+
+  it("pins preview/source toggle in the footer and reports mode changes", async () => {
+    const user = userEvent.setup();
+    const onEditorModeChange = vi.fn();
+    render(
+      <MarkdownTocPanel
+        items={sampleItems}
+        onSelect={vi.fn()}
+        editorMode="wysiwyg"
+        onEditorModeChange={onEditorModeChange}
+      />,
+    );
+
+    const preview = screen.getByRole("button", { name: "预览" });
+    const source = screen.getByRole("button", { name: "源码" });
+    expect(preview).toHaveAttribute("aria-pressed", "true");
+    expect(source).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("group", { name: "Markdown 显示模式" })).toHaveClass(
+      "forkly-md-toc-footer",
+    );
+
+    await user.click(source);
+    expect(onEditorModeChange).toHaveBeenCalledWith("source");
+  });
+
+  it("omits mode toggle when no mode callback is provided", () => {
+    render(<MarkdownTocPanel items={sampleItems} onSelect={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "预览" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "源码" })).toBeNull();
+  });
 });

@@ -323,10 +323,30 @@
   flex-shrink: 0;
   border-right: 1px solid var(--color-border);
   background: var(--color-canvas-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.forkly-md-toc-scroll {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  min-height: 0;
+}
+
+.forkly-md-toc-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+.forkly-md-toc-footer {
+  border-top-color: var(--color-border);
+  background: var(--color-canvas-subtle);
 }
 
 .forkly-md-toc::-webkit-scrollbar {

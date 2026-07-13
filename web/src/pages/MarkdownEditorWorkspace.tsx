@@ -1,5 +1,7 @@
 import {
   Fragment,
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useRef,
@@ -9,13 +11,19 @@ import { CheckCircle, Circle, CircleNotch, WarningCircle, X, XCircle } from "@ph
 import type { FileContent } from "../api";
 import {
   MarkdownEditorView,
+  type IndexCursor,
   type MarkdownEditorHandle,
   type SearchResult,
   type SearchOpts,
   type TocItem,
 } from "../components/files/markdown/MarkdownEditorView";
 import { MarkdownCategoryToolbar, type FormatCommand } from "../components/files/markdown/MarkdownCategoryToolbar";
-import { MarkdownTocPanel } from "../components/files/markdown/MarkdownTocPanel";
+import {
+  MarkdownTocPanel,
+  type MarkdownEditorMode,
+} from "../components/files/markdown/MarkdownTocPanel";
+import type { MarkdownSourceEditorHandle } from "../components/files/markdown/MarkdownSourceEditorView";
+import { findMarkdownHeadingLine } from "../components/files/markdown/sourceModeToc";
 import { useMarkdownDocument } from "../components/files/markdown/useMarkdownDocument";
 import { useRegisterMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
@@ -32,6 +40,12 @@ import {
 } from "./editorScrollRestore";
 import { EditorErrorBoundary } from "./EditorErrorBoundary";
 import "../components/files/markdown/markdown-editor.css";
+import "../components/files/markdown/markdown-source.css";
+
+const MarkdownSourceEditorView = lazy(async () => {
+  const mod = await import("../components/files/markdown/MarkdownSourceEditorView");
+  return { default: mod.MarkdownSourceEditorView };
+});
 
 const TOC_NAV_LOCK_MS = 2000;
 const SCROLL_RESTORE_WATCH_MS = 4000;
@@ -155,12 +169,20 @@ export function MarkdownEditorWorkspace({
   file: FileContent;
 }) {
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
+  const sourceEditorRef = useRef<MarkdownSourceEditorHandle | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
   /** While set, ignore scroll-derived TOC highlights so smooth navigation does not flash intermediates. */
   const tocNavLockRef = useRef<{ slug: string; timer: number | null } | null>(null);
   const syncActiveFromScrollRef = useRef<() => void>(() => undefined);
   const suppressScrollSaveRef = useRef(false);
   const tocRef = useRef<TocItem[]>([]);
+  const wysiwygSelectionRef = useRef<unknown>(null);
+  const editorModeRef = useRef<MarkdownEditorMode>("wysiwyg");
+  const sourceBootstrapRef = useRef<string | null>(null);
+  const [editorMode, setEditorMode] = useState<MarkdownEditorMode>("wysiwyg");
+  editorModeRef.current = editorMode;
+  const [sourceCursor, setSourceCursor] = useState<IndexCursor | null>(null);
+  const [sourceBootstrapMarkdown, setSourceBootstrapMarkdown] = useState<string | null>(null);
   const [editorReadyTick, setEditorReadyTick] = useState(0);
   const [toc, setToc] = useState<TocItem[]>([]);
   tocRef.current = toc;
@@ -230,8 +252,20 @@ export function MarkdownEditorWorkspace({
 
   useEffect(() => {
     registerSerializer({
-      flush: () => editorRef.current?.flush(),
-      getMarkdown: () => editorRef.current?.getMarkdown() ?? draftMarkdown,
+      flush: () => {
+        if (editorModeRef.current === "source") return;
+        editorRef.current?.flush();
+      },
+      getMarkdown: () => {
+        if (editorModeRef.current === "source") {
+          return (
+            sourceEditorRef.current?.getValue() ??
+            sourceBootstrapRef.current ??
+            draftMarkdown
+          );
+        }
+        return editorRef.current?.getMarkdown() ?? draftMarkdown;
+      },
     });
     return () => registerSerializer(null);
   }, [registerSerializer, draftMarkdown]);
@@ -383,7 +417,9 @@ export function MarkdownEditorWorkspace({
 
   const runSearch = useCallback(
     (query: string, opts?: SearchOpts) => {
-      if (!editorRef.current) return;
+      const active =
+        editorModeRef.current === "source" ? sourceEditorRef.current : editorRef.current;
+      if (!active) return;
       const isCaseSensitive = opts?.isCaseSensitive ?? findCase;
       const isWholeWord = opts?.isWholeWord ?? findWord;
       const isRegexp = opts?.isRegexp ?? findRegex;
@@ -391,17 +427,17 @@ export function MarkdownEditorWorkspace({
         try {
           void new RegExp(query);
         } catch {
-          editorRef.current.search("");
+          active.search("");
           setFindInfo({ count: 0, index: -1, error: "无效的正则表达式" });
           return;
         }
       }
       if (!query) {
-        editorRef.current.search("");
+        active.search("");
         setFindInfo({ count: 0, index: -1 });
         return;
       }
-      const result = editorRef.current.search(query, {
+      const result = active.search(query, {
         isCaseSensitive,
         isWholeWord,
         isRegexp,
@@ -416,6 +452,10 @@ export function MarkdownEditorWorkspace({
     setFindInfo({ count: matches.length, index: result.index, error: undefined });
   }
 
+  function activeEditor() {
+    return editorModeRef.current === "source" ? sourceEditorRef.current : editorRef.current;
+  }
+
   function openFind(focusTarget: "find" | "replace" = "find") {
     setFindFocusTarget(focusTarget);
     setFindMounted(true);
@@ -425,11 +465,53 @@ export function MarkdownEditorWorkspace({
   function closeFind() {
     if (!findOpen && !findMounted) return;
     setFindOpen(false);
-    editorRef.current?.search("", { selectHighlight: true });
-    editorRef.current?.focus();
+    activeEditor()?.search("", { selectHighlight: true });
+    activeEditor()?.focus();
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setFindMounted(false);
     }
+  }
+
+  function switchEditorMode(next: MarkdownEditorMode) {
+    if (next === editorModeRef.current) return;
+
+    if (next === "source") {
+      const ed = editorRef.current;
+      if (!ed) return;
+      ed.flush();
+      ed.hideAllFloatTools();
+      wysiwygSelectionRef.current = ed.getSelectionSnapshot();
+      const markdown = ed.getMarkdown();
+      const cursor = ed.getCursorOffset();
+      // Keep a sync ref so autosave/Cmd+S before CodeMirror mounts cannot fall
+      // back to a stale React draftMarkdown left behind by Muya-only edits.
+      sourceBootstrapRef.current = markdown;
+      setSourceBootstrapMarkdown(markdown);
+      setSourceCursor(cursor);
+      editorModeRef.current = "source";
+      setEditorMode("source");
+      return;
+    }
+
+    const src = sourceEditorRef.current;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const bootstrap = sourceBootstrapRef.current;
+    const markdown = src?.getValue() ?? bootstrap ?? draftMarkdown;
+    const cursor = src?.getIndexCursor() ?? null;
+    ed.replaceContent(markdown, wysiwygSelectionRef.current);
+    if (cursor) ed.setCursorByOffset(cursor);
+    setToc(ed.getTOC());
+    editorModeRef.current = "wysiwyg";
+    setEditorMode("wysiwyg");
+    setSourceCursor(null);
+    setSourceBootstrapMarkdown(null);
+    sourceBootstrapRef.current = null;
+    // Avoid marking dirty when the user only peeked at source without edits.
+    if (bootstrap == null || markdown !== bootstrap) {
+      setDraftFromEditor();
+    }
+    window.requestAnimationFrame(() => ed.focus());
   }
 
   useEffect(() => {
@@ -467,7 +549,7 @@ export function MarkdownEditorWorkspace({
       if (mod && e.key.toLowerCase() === "g") {
         e.preventDefault();
         openFind();
-        const r = editorRef.current?.find(e.shiftKey ? "previous" : "next");
+        const r = activeEditor()?.find(e.shiftKey ? "previous" : "next");
         if (r) applySearchResult(r);
         return;
       }
@@ -477,18 +559,20 @@ export function MarkdownEditorWorkspace({
         const t = e.target;
         if (isFormField(t)) return;
         e.preventDefault();
-        if (e.shiftKey) editorRef.current?.redo();
-        else editorRef.current?.undo();
+        if (e.shiftKey) activeEditor()?.redo();
+        else activeEditor()?.undo();
+        if (editorModeRef.current === "source") setDraftFromEditor();
         return;
       }
       if (mod && !e.shiftKey && e.key.toLowerCase() === "y") {
         const t = e.target;
         if (isFormField(t)) return;
         e.preventDefault();
-        editorRef.current?.redo();
+        activeEditor()?.redo();
+        if (editorModeRef.current === "source") setDraftFromEditor();
         return;
       }
-      if (isEditorKeyTarget(e.target)) {
+      if (editorModeRef.current === "wysiwyg" && isEditorKeyTarget(e.target)) {
         if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
           e.preventDefault();
           editorRef.current?.format("link");
@@ -509,11 +593,11 @@ export function MarkdownEditorWorkspace({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [findOpen, flush]);
+  }, [findOpen, flush, setDraftFromEditor]);
 
   useEffect(() => {
     const root = scrollRootRef.current;
-    if (!root || toc.length === 0) return;
+    if (!root || toc.length === 0 || editorMode !== "wysiwyg") return;
     const scrollRoot = root;
     const tocSlugs = toc.map((item) => item.slug);
 
@@ -573,10 +657,23 @@ export function MarkdownEditorWorkspace({
       scrollRoot.removeEventListener("wheel", onUserScrollIntent);
       scrollRoot.removeEventListener("touchmove", onUserScrollIntent);
     };
-  }, [toc]);
+  }, [toc, editorMode]);
 
   function selectTocHeading(slug: string) {
     setActiveSlug(slug);
+
+    if (editorModeRef.current === "source") {
+      const src = sourceEditorRef.current;
+      if (!src) return;
+      const index = tocRef.current.findIndex((item) => item.slug === slug);
+      const line = findMarkdownHeadingLine(src.getValue(), index);
+      if (line < 0) return;
+      src.scrollToLine(line);
+      const top = src.heightAtLine(line);
+      scrollRootRef.current?.scrollTo({ top, behavior: "smooth" });
+      return;
+    }
+
     const ok = editorRef.current?.scrollToHeading(slug) ?? false;
     if (!ok) return;
 
@@ -600,6 +697,43 @@ export function MarkdownEditorWorkspace({
   }
 
   function handleCommand(cmd: FormatCommand) {
+    if (editorModeRef.current === "source") {
+      const src = sourceEditorRef.current;
+      if (!src) return;
+      if (cmd === "undo") {
+        src.undo();
+        setDraftFromEditor();
+        return;
+      }
+      if (cmd === "redo") {
+        src.redo();
+        setDraftFromEditor();
+        return;
+      }
+      if (cmd === "find:open") {
+        if (findOpen) closeFind();
+        else openFind();
+        return;
+      }
+      if (cmd === "find:previous") {
+        openFind();
+        applySearchResult(src.find("previous"));
+        return;
+      }
+      if (cmd === "find:next") {
+        openFind();
+        applySearchResult(src.find("next"));
+        return;
+      }
+      if (cmd === "find:replace") {
+        openFind();
+        applySearchResult(src.replace(replaceQuery, { isSingle: true, isRegexp: findRegex }));
+        setDraftFromEditor();
+        return;
+      }
+      return;
+    }
+
     const ed = editorRef.current;
     if (!ed) return;
     // undo/redo restore their own caret via History; a trailing focus() can
@@ -633,6 +767,16 @@ export function MarkdownEditorWorkspace({
     else ed.format(cmd);
     ed.focus();
   }
+
+  const handleEditorReady = useCallback(() => {
+    const root = scrollRootRef.current;
+    if (root) blurFocusedEditorIn(root);
+    setEditorReadyTick((n) => n + 1);
+  }, []);
+
+  const handleSourceEditorReady = useCallback(() => {
+    sourceEditorRef.current?.focus();
+  }, []);
 
   const openHref = useCallback((href: string) => {
     window.open(href, "_blank", "noopener,noreferrer");
@@ -705,7 +849,13 @@ export function MarkdownEditorWorkspace({
             <button
               type="button"
               onClick={() => {
-                void discardDraft().then(() => setEditorKey((k) => k + 1));
+                void discardDraft().then(() => {
+                  setEditorMode("wysiwyg");
+                  setSourceCursor(null);
+                  setSourceBootstrapMarkdown(null);
+                  sourceBootstrapRef.current = null;
+                  setEditorKey((k) => k + 1);
+                });
               }}
             >
               放弃草稿并重载
@@ -725,6 +875,10 @@ export function MarkdownEditorWorkspace({
             className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)]"
             onClick={() => {
               setEditorError(null);
+              setEditorMode("wysiwyg");
+              setSourceCursor(null);
+              setSourceBootstrapMarkdown(null);
+              sourceBootstrapRef.current = null;
               setEditorKey((k) => k + 1);
             }}
           >
@@ -738,6 +892,8 @@ export function MarkdownEditorWorkspace({
           items={toc}
           activeSlug={activeSlug}
           onSelect={selectTocHeading}
+          editorMode={editorMode}
+          onEditorModeChange={switchEditorMode}
         />
 
         <section className="forkly-md-editor-main">
@@ -762,7 +918,7 @@ export function MarkdownEditorWorkspace({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    const r = editorRef.current?.find(e.shiftKey ? "previous" : "next");
+                    const r = activeEditor()?.find(e.shiftKey ? "previous" : "next");
                     if (r) applySearchResult(r);
                   }
                 }}
@@ -777,7 +933,7 @@ export function MarkdownEditorWorkspace({
               <button
                 type="button"
                 onClick={() => {
-                  const r = editorRef.current?.find("previous");
+                  const r = activeEditor()?.find("previous");
                   if (r) applySearchResult(r);
                 }}
               >
@@ -786,7 +942,7 @@ export function MarkdownEditorWorkspace({
               <button
                 type="button"
                 onClick={() => {
-                  const r = editorRef.current?.find("next");
+                  const r = activeEditor()?.find("next");
                   if (r) applySearchResult(r);
                 }}
               >
@@ -795,7 +951,7 @@ export function MarkdownEditorWorkspace({
               <button
                 type="button"
                 onClick={() => {
-                  const r = editorRef.current?.replace(replaceQuery, {
+                  const r = activeEditor()?.replace(replaceQuery, {
                     isSingle: true,
                     isRegexp: findRegex,
                   });
@@ -808,7 +964,7 @@ export function MarkdownEditorWorkspace({
               <button
                 type="button"
                 onClick={() => {
-                  const r = editorRef.current?.replace(replaceQuery, {
+                  const r = activeEditor()?.replace(replaceQuery, {
                     isSingle: false,
                     isRegexp: findRegex,
                   });
@@ -870,7 +1026,10 @@ export function MarkdownEditorWorkspace({
             </div>
           ) : null}
 
-          <div ref={scrollRootRef} className="forkly-md-editor-scroll">
+          <div
+            ref={scrollRootRef}
+            className={`forkly-md-editor-scroll${editorMode === "source" ? " is-source-mode" : ""}`}
+          >
             <EditorErrorBoundary
               resetKey={editorKey}
               silent
@@ -882,27 +1041,37 @@ export function MarkdownEditorWorkspace({
                 key={editorKey}
                 ref={editorRef}
                 markdown={draftMarkdown}
-                syncExternalContent={saveStatus === "clean"}
+                syncExternalContent={saveStatus === "clean" && editorMode === "wysiwyg"}
+                hidden={editorMode === "source"}
                 documentKey={transport.remountKey}
                 markdownPath={transport.markdownPath}
                 assetURL={transport.assetURL}
                 uploadAsset={transport.uploadAsset}
                 onChange={() => setDraftFromEditor()}
                 onTocChange={setToc}
-                onReady={() => {
-                  const root = scrollRootRef.current;
-                  if (root) blurFocusedEditorIn(root);
-                  setEditorReadyTick((n) => n + 1);
-                }}
+                onReady={handleEditorReady}
                 onOpenPath={handleOpenPath}
                 onError={(err) => setEditorError(err)}
               />
+              {editorMode === "source" ? (
+                <Suspense fallback={<div className="p-4 text-sm text-[var(--color-text-tertiary)]">加载源码编辑器…</div>}>
+                  <MarkdownSourceEditorView
+                    key={`source-${editorKey}`}
+                    ref={sourceEditorRef}
+                    markdown={sourceBootstrapMarkdown ?? draftMarkdown}
+                    cursor={sourceCursor}
+                    onChange={() => setDraftFromEditor()}
+                    onReady={handleSourceEditorReady}
+                  />
+                </Suspense>
+              ) : null}
             </EditorErrorBoundary>
           </div>
         </section>
 
         <MarkdownCategoryToolbar
           onCommand={handleCommand}
+          sourceMode={editorMode === "source"}
           findOpen={findOpen}
           findQuery={findQuery}
         />

@@ -1,0 +1,49 @@
+.forkly-md-source-editor {
+  min-height: 100%;
+}
+
+.forkly-md-source-editor .CodeMirror {
+  height: auto;
+  min-height: 100%;
+  background: transparent;
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.forkly-md-source-editor .CodeMirror-scroll {
+  min-height: calc(100vh - 120px);
+  padding-bottom: 48px;
+}
+
+.forkly-md-source-editor .CodeMirror-gutters {
+  background: transparent;
+  border-right: 1px solid var(--color-border);
+}
+
+.forkly-md-source-editor .CodeMirror-linenumber {
+  color: var(--color-text-tertiary);
+  padding: 0 8px 0 4px;
+}
+
+.forkly-md-source-editor .CodeMirror-cursor {
+  border-left: 1px solid var(--color-text);
+}
+
+.forkly-md-source-editor .CodeMirror-selected {
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
+.forkly-md-source-editor .CodeMirror-activeline-background {
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+}
+
+.forkly-md-editor-scroll.is-source-mode {
+  padding-top: 8px;
+}
+
+.forkly-md-editor-scroll .forkly-markdown-editor.is-source-hidden {
+  display: none !important;
+}

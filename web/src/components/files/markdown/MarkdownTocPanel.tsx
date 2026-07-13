@@ -16,14 +16,25 @@ import {
   pruneCollapsedTocSlugs,
   visibleTocIndexes,
 } from "./tocTree";
+import { SegmentedButton, SegmentedButtonGroup } from "../../ui/SegmentedButton";
+
+export type MarkdownEditorMode = "wysiwyg" | "source";
 
 type Props = {
   items: TocItem[];
   activeSlug?: string;
   onSelect: (slug: string) => void;
+  editorMode?: MarkdownEditorMode;
+  onEditorModeChange?: (mode: MarkdownEditorMode) => void;
 };
 
-export function MarkdownTocPanel({ items, activeSlug = "", onSelect }: Props) {
+export function MarkdownTocPanel({
+  items,
+  activeSlug = "",
+  onSelect,
+  editorMode = "wysiwyg",
+  onEditorModeChange,
+}: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [menu, setMenu] = useState<MarkdownTocContextMenuState | null>(null);
   const [error, setError] = useState("");
@@ -35,6 +46,7 @@ export function MarkdownTocPanel({ items, activeSlug = "", onSelect }: Props) {
   const visibleIndexes = useMemo(() => visibleTocIndexes(items, collapsed), [items, collapsed]);
   const collapsibleSlugs = useMemo(() => new Set(collectCollapsibleTocSlugs(items)), [items]);
   const anyCollapsed = collapsed.size > 0;
+  const showModeToggle = typeof onEditorModeChange === "function";
 
   function showError(message: string) {
     setError(message);
@@ -100,67 +112,86 @@ export function MarkdownTocPanel({ items, activeSlug = "", onSelect }: Props) {
 
   return (
     <aside className="forkly-md-toc" aria-label="标题目录" onContextMenu={openRootMenu}>
-      {error ? (
-        <div
-          role="status"
-          className="forkly-md-toc-error mx-2 mt-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
-        >
-          {error}
-        </div>
-      ) : null}
+      <div className="forkly-md-toc-scroll">
+        {error ? (
+          <div
+            role="status"
+            className="forkly-md-toc-error mx-2 mt-2 rounded-[var(--radius-sm)] border px-2 py-1 text-xs border-[var(--color-error-fg)]/30 bg-[var(--color-error-bg)] text-[var(--color-error-fg)]"
+          >
+            {error}
+          </div>
+        ) : null}
 
-      {items.length === 0 ? (
-        <div className="forkly-md-toc-empty">暂无标题</div>
-      ) : (
-        <nav className="forkly-md-toc-nav">
-          {visibleIndexes.map((index) => {
-            const item = items[index];
-            const active = item.slug === activeSlug;
-            const canCollapse = collapsibleSlugs.has(item.slug);
-            const isExpanded = canCollapse && !collapsed.has(item.slug);
-            const pad = 8 + Math.max(0, item.lvl - 1) * 12;
+        {items.length === 0 ? (
+          <div className="forkly-md-toc-empty">暂无标题</div>
+        ) : (
+          <nav className="forkly-md-toc-nav">
+            {visibleIndexes.map((index) => {
+              const item = items[index];
+              const active = item.slug === activeSlug;
+              const canCollapse = collapsibleSlugs.has(item.slug);
+              const isExpanded = canCollapse && !collapsed.has(item.slug);
+              const pad = 8 + Math.max(0, item.lvl - 1) * 12;
 
-            return (
-              <div
-                key={item.slug}
-                className={`forkly-md-toc-row ${active ? "is-active" : ""}`}
-                style={{ paddingLeft: pad }}
-                onContextMenu={(event) => openHeadingMenu(event, item, index)}
-              >
-                {canCollapse ? (
+              return (
+                <div
+                  key={item.slug}
+                  className={`forkly-md-toc-row ${active ? "is-active" : ""}`}
+                  style={{ paddingLeft: pad }}
+                  onContextMenu={(event) => openHeadingMenu(event, item, index)}
+                >
+                  {canCollapse ? (
+                    <button
+                      type="button"
+                      className="forkly-md-toc-caret"
+                      aria-label={isExpanded ? "折叠子标题" : "展开子标题"}
+                      aria-expanded={isExpanded}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleHeading(item.slug);
+                      }}
+                    >
+                      <CaretRight
+                        size={12}
+                        className={`forkly-md-toc-caret-icon ${isExpanded ? "is-expanded" : ""}`}
+                        aria-hidden
+                      />
+                    </button>
+                  ) : (
+                    <span className="forkly-md-toc-caret-spacer" aria-hidden />
+                  )}
                   <button
                     type="button"
-                    className="forkly-md-toc-caret"
-                    aria-label={isExpanded ? "折叠子标题" : "展开子标题"}
-                    aria-expanded={isExpanded}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleHeading(item.slug);
-                    }}
+                    className="forkly-md-toc-item"
+                    title={item.content}
+                    aria-current={active ? "true" : undefined}
+                    onClick={() => onSelect(item.slug)}
                   >
-                    <CaretRight
-                      size={12}
-                      className={`forkly-md-toc-caret-icon ${isExpanded ? "is-expanded" : ""}`}
-                      aria-hidden
-                    />
+                    {item.content || "(无标题)"}
                   </button>
-                ) : (
-                  <span className="forkly-md-toc-caret-spacer" aria-hidden />
-                )}
-                <button
-                  type="button"
-                  className="forkly-md-toc-item"
-                  title={item.content}
-                  aria-current={active ? "true" : undefined}
-                  onClick={() => onSelect(item.slug)}
-                >
-                  {item.content || "(无标题)"}
-                </button>
-              </div>
-            );
-          })}
-        </nav>
-      )}
+                </div>
+              );
+            })}
+          </nav>
+        )}
+      </div>
+
+      {showModeToggle ? (
+        <SegmentedButtonGroup label="Markdown 显示模式" className="forkly-md-toc-footer">
+          <SegmentedButton
+            active={editorMode === "wysiwyg"}
+            onClick={() => onEditorModeChange?.("wysiwyg")}
+          >
+            预览
+          </SegmentedButton>
+          <SegmentedButton
+            active={editorMode === "source"}
+            onClick={() => onEditorModeChange?.("source")}
+          >
+            源码
+          </SegmentedButton>
+        </SegmentedButtonGroup>
+      ) : null}
 
       {menu ? (
         <MarkdownTocContextMenu

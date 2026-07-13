@@ -32,6 +32,16 @@ export type MarkdownEditorHandle = {
   setContent: (markdown: string) => void;
   getTOC: () => TocItem[];
   scrollToHeading: (slug: string) => boolean;
+  /** Opaque selection snapshot for source-mode handoff undo boundary. */
+  getSelectionSnapshot: () => unknown;
+  getCursorOffset: () => IndexCursor | null;
+  replaceContent: (markdown: string, recordSelection?: unknown) => boolean;
+  setCursorByOffset: (cursor: IndexCursor) => boolean;
+};
+
+export type IndexCursor = {
+  anchor: { line: number; ch: number };
+  focus: { line: number; ch: number };
 };
 
 export type SearchOpts = {
@@ -81,6 +91,10 @@ type MuyaInstance = {
   on: (event: string, listener: (...args: unknown[]) => void) => void;
   off: (event: string, listener: (...args: unknown[]) => void) => void;
   getTOC: () => TocItem[];
+  getSelection: () => unknown;
+  getCursorOffset: () => IndexCursor | null;
+  replaceContent: (content: string, recordSelection?: unknown) => boolean;
+  setCursorByOffset: (cursor: IndexCursor) => boolean;
   options: Record<string, unknown>;
   domNode?: HTMLElement | null;
 };
@@ -240,6 +254,11 @@ export const MarkdownEditorView = forwardRef<MarkdownEditorHandle, Props>(functi
       if (!muya) return false;
       return scrollToHeadingBySlug(muya, slug);
     },
+    getSelectionSnapshot: () => muyaRef.current?.getSelection() ?? null,
+    getCursorOffset: () => muyaRef.current?.getCursorOffset() ?? null,
+    replaceContent: (md, recordSelection) =>
+      muyaRef.current?.replaceContent(md, recordSelection) ?? false,
+    setCursorByOffset: (cursor) => muyaRef.current?.setCursorByOffset(cursor) ?? false,
   }));
 
   useEffect(() => {
