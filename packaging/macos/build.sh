@@ -103,6 +103,8 @@ export GOARCH
 go build -ldflags "-X github.com/forkly-app/forkly/internal/app.Version=${VERSION} -X github.com/forkly-app/forkly/internal/github.ClientID=${FORKLY_GITHUB_CLIENT_ID:-}" \
   -o "$APP/Contents/MacOS/forkly" ./cmd/forkly
 go build -o "$APP/Contents/MacOS/forkly-askpass" ./cmd/forkly-askpass
+CGO_ENABLED=0 go build -ldflags "-X github.com/forkly-app/forkly/internal/cli.Version=${VERSION}" \
+  -o "$APP/Contents/MacOS/forklyctl" ./cmd/forklyctl
 
 # Optional signing
 SIGN_IDENTITY="${FORKLY_SIGN_IDENTITY:-}"
@@ -112,6 +114,7 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$bin" || true
   done < <(find "$APP/Contents/Resources/git" -type f -perm +111 -print0)
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/forkly"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/forklyctl"
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --deep --strict "$APP"
 else

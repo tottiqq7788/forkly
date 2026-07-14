@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/forkly-app/forkly/internal/agentauth"
 	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/gitexec"
@@ -18,6 +19,7 @@ import (
 	"github.com/forkly-app/forkly/internal/operation"
 	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
+	"github.com/forkly-app/forkly/internal/runtimeinfo"
 	"github.com/forkly-app/forkly/internal/session"
 	"github.com/forkly-app/forkly/internal/watcher"
 	"github.com/forkly-app/forkly/internal/webui"
@@ -32,6 +34,7 @@ type Deps struct {
 	GitHub     *gh.Client
 	Ops        *operation.Manager
 	Sessions   *session.Manager
+	Agents     *agentauth.Manager
 	LocalFiles *localfile.Service
 	Picker     platform.FolderPicker
 	Reveal     platform.RevealInFinder
@@ -46,15 +49,25 @@ type StartOptions struct {
 }
 
 type Server struct {
-	deps Deps
-	ln   net.Listener
-	srv  *http.Server
-	addr string
-	cop  *http.CrossOriginProtection
+	deps    Deps
+	ln      net.Listener
+	srv     *http.Server
+	addr    string
+	cop     *http.CrossOriginProtection
+	runtime runtimeinfo.Info
 }
 
 func New(deps Deps) *Server {
 	return &Server{deps: deps, cop: http.NewCrossOriginProtection()}
+}
+
+// SetRuntime attaches discovery identity so /health can attest api.json.
+func (s *Server) SetRuntime(info runtimeinfo.Info) {
+	s.runtime = info
+}
+
+func (s *Server) RuntimeIdentity() (pid int, nonce string) {
+	return s.runtime.PID, s.runtime.Nonce
 }
 
 func (s *Server) Start() (string, error) {
@@ -100,7 +113,17 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	mux.HandleFunc("/local-api/v1/projects/clone", s.authWrite(s.handleProjectClone))
 	mux.HandleFunc("/local-api/v1/operations/", s.auth(s.handleOperations))
 	mux.HandleFunc("/local-api/v1/dialog/folder", s.authWrite(s.handleFolderDialog))
+	mux.HandleFunc("/local-api/v1/local-files/open", s.authWrite(s.handleLocalFileOpen))
 	mux.HandleFunc("/local-api/v1/local-files/", s.auth(s.handleLocalFiles))
+	mux.HandleFunc("/local-api/v1/cli/install", s.handleCLIInstall)
+	mux.HandleFunc("/local-api/v1/agent/pair/start", s.handleAgentPairStart)
+	mux.HandleFunc("/local-api/v1/agent/pair/status", s.handleAgentPairStatus)
+	mux.HandleFunc("/local-api/v1/agent/pair/claim", s.handleAgentPairClaim)
+	mux.HandleFunc("/local-api/v1/agent/pair/pending", s.authBrowser(s.handleAgentPairPending))
+	mux.HandleFunc("/local-api/v1/agent/pair/approve", s.handleAgentPairApprove)
+	mux.HandleFunc("/local-api/v1/agent/pair/deny", s.handleAgentPairDeny)
+	mux.HandleFunc("/local-api/v1/agent/clients", s.handleAgentClients)
+	mux.HandleFunc("/local-api/v1/agent/clients/", s.handleAgentClients)
 	mux.Handle("/", s.static())
 
 	handler := s.securityHeaders(s.cop.Handler(mux))
@@ -203,10 +226,62 @@ func assertLoopbackListen(addr string) error {
 
 type ctxKey int
 
-const sessionKey ctxKey = 1
+const (
+	sessionKey ctxKey = 1
+	agentKey   ctxKey = 2
+)
+
+func bearerToken(r *http.Request) string {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	if len(h) < 8 {
+		return ""
+	}
+	if !strings.EqualFold(h[:7], "bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(h[7:])
+}
+
+func (s *Server) authBrowser(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if bearerToken(r) != "" {
+			writeErr(w, http.StatusForbidden, "此接口仅支持浏览器会话")
+			return
+		}
+		s.auth(next)(w, r)
+	}
+}
+
+func (s *Server) authBrowserWrite(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if bearerToken(r) != "" {
+			writeErr(w, http.StatusForbidden, "此接口仅支持浏览器会话")
+			return
+		}
+		s.authWrite(next)(w, r)
+	}
+}
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if tok := bearerToken(r); tok != "" {
+			if s.deps.Agents == nil {
+				writeErr(w, http.StatusUnauthorized, "未启用 Agent 授权")
+				return
+			}
+			auth, err := s.deps.Agents.Authenticate(tok)
+			if err != nil {
+				writeErr(w, http.StatusUnauthorized, "Agent 令牌无效或已撤销")
+				return
+			}
+			if err := agentauth.RequireScopes(auth.Scopes, agentauth.ScopeRead); err != nil {
+				writeErrCode(w, http.StatusForbidden, "缺少 read 权限", "scope_denied", nil)
+				return
+			}
+			ctx := context.WithValue(r.Context(), agentKey, auth)
+			next(w, r.WithContext(ctx))
+			return
+		}
 		sess, ok := s.deps.Sessions.FromRequest(r)
 		if !ok {
 			// DevMode: API restarts wipe in-memory sessions; mint a new one so
@@ -230,6 +305,18 @@ func (s *Server) authWrite(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
+		if auth, ok := r.Context().Value(agentKey).(agentauth.AuthResult); ok {
+			need := requiredScopesForRequest(r)
+			if err := agentauth.RequireScopes(auth.Scopes, need...); err != nil {
+				writeErrCode(w, http.StatusForbidden, "当前 Agent 授权不足以执行此操作", "scope_denied", map[string]any{
+					"required": need,
+					"have":     auth.Scopes,
+				})
+				return
+			}
+			next(w, r)
+			return
+		}
 		sess := r.Context().Value(sessionKey).(*session.Session)
 		if !s.deps.Sessions.ValidateCSRF(r, sess) {
 			writeErr(w, http.StatusForbidden, "CSRF 校验失败")
@@ -237,6 +324,29 @@ func (s *Server) authWrite(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	})
+}
+
+func requiredScopesForRequest(r *http.Request) []string {
+	path := r.URL.Path
+	switch {
+	case strings.Contains(path, "/remote/") || strings.HasSuffix(path, "/remote") ||
+		strings.Contains(path, "/projects/clone") || strings.Contains(path, "/create-repo"):
+		return []string{agentauth.ScopeRemoteWrite}
+	case strings.Contains(path, "/branches"):
+		return []string{agentauth.ScopeBranchWrite}
+	case strings.Contains(path, "/commit"):
+		return []string{agentauth.ScopeCommit}
+	case strings.Contains(path, "/github/") || strings.HasSuffix(path, "/settings/github"):
+		return []string{agentauth.ScopeAccountAdmin}
+	case strings.Contains(path, "/content") || strings.Contains(path, "/entries") ||
+		strings.Contains(path, "/asset") || strings.Contains(path, "/local-files"):
+		return []string{agentauth.ScopeFileWrite}
+	case strings.Contains(path, "/dialog/"):
+		return []string{agentauth.ScopeUIControl}
+	default:
+		// project add/delete/relocate/settings/hideRules/agent revoke approve
+		return []string{agentauth.ScopeProjectAdmin}
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -76,6 +76,67 @@ Filename: "{cmd}"; Parameters: "/C assoc .markdown=Forkly.Markdown >NUL 2>NUL"; 
 Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden skipifdoesntexist; Tasks: markdownassoc
 
 [Code]
+function NeedsAddPath(Param: string): Boolean;
+var
+  OrigPath: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
+    Result := True
+  else
+    Result := Pos(';' + Uppercase(Param) + ';', ';' + Uppercase(OrigPath) + ';') = 0;
+end;
+
+procedure AddToPath(Param: string);
+var
+  OrigPath: string;
+begin
+  if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
+    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath + ';' + Param)
+  else
+    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Param);
+end;
+
+procedure RemoveFromPath(Param: string);
+var
+  OrigPath, NewPath: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
+    Exit;
+  NewPath := OrigPath;
+  P := Pos(';' + Uppercase(Param) + ';', ';' + Uppercase(NewPath) + ';');
+  if P > 0 then
+    Delete(NewPath, P, Length(Param) + 1)
+  else if Uppercase(Copy(NewPath, 1, Length(Param))) = Uppercase(Param) then
+  begin
+    if Length(NewPath) = Length(Param) then
+      NewPath := ''
+    else if NewPath[Length(Param) + 1] = ';' then
+      Delete(NewPath, 1, Length(Param) + 1);
+  end
+  else if Uppercase(Copy(NewPath, Length(NewPath) - Length(Param) + 1, Length(Param))) = Uppercase(Param) then
+  begin
+    if NewPath[Length(NewPath) - Length(Param)] = ';' then
+      Delete(NewPath, Length(NewPath) - Length(Param) + 1, Length(Param));
+  end;
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if NeedsAddPath(ExpandConstant('{app}')) then
+      AddToPath(ExpandConstant('{app}'));
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemoveFromPath(ExpandConstant('{app}'));
+end;
+
 function InitializeSetup(): Boolean;
 begin
   Result := True;

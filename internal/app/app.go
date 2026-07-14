@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"fyne.io/systray"
+	"github.com/forkly-app/forkly/internal/agentauth"
 	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/credentials"
 	"github.com/forkly-app/forkly/internal/diagnostics"
@@ -21,11 +22,12 @@ import (
 	"github.com/forkly-app/forkly/internal/operation"
 	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
+	"github.com/forkly-app/forkly/internal/runtimeinfo"
 	"github.com/forkly-app/forkly/internal/session"
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.47"
+var Version = "0.1.48"
 
 // LaunchPaths holds Markdown paths collected before the app is fully ready.
 type LaunchOptions struct {
@@ -81,6 +83,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	sessions := session.NewManager(12 * time.Hour)
 	localFiles := localfile.NewService(git)
 	creds := credentials.NewKeychainStore()
+	agentCreds := credentials.NewKeychainStoreForService(credentials.AgentServiceName)
 	githubClient := gh.NewClient(creds)
 	ops := operation.NewManager()
 	remotes := &project.RemoteService{
@@ -89,6 +92,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		Git:      git,
 		GitHub:   githubClient,
 	}
+	agents := agentauth.NewManager(store, agentCreds)
 	bg := NewBackgroundFetcher(log, store, remotes)
 	bg.SetProjects(projects)
 	bg.Start()
@@ -103,7 +107,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
 		Remotes: remotes, GitHub: githubClient, Ops: ops,
-		Sessions: sessions, LocalFiles: localFiles,
+		Sessions: sessions, Agents: agents, LocalFiles: localFiles,
 		Picker: picker, Reveal: reveal, Watcher: wm, Version: Version,
 	})
 	addr, err := api.Start()
@@ -111,6 +115,21 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		return err
 	}
 	log.Info("local api listening", "addr", addr)
+	runtimeInfo, rtErr := runtimeinfo.New(addr, Version)
+	if rtErr != nil {
+		log.Error("runtime info create", "err", rtErr)
+	} else {
+		api.SetRuntime(runtimeInfo)
+		if err := runtimeinfo.Write(dataDir, runtimeInfo); err != nil {
+			log.Error("runtime info write", "err", err)
+		} else {
+			defer func() {
+				if err := runtimeinfo.RemoveIfOwner(dataDir, runtimeInfo); err != nil {
+					log.Error("runtime info remove", "err", err)
+				}
+			}()
+		}
+	}
 	defer api.Shutdown(context.Background())
 
 	openConsole := func() {
@@ -197,6 +216,8 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		systray.SetTitle("")
 		systray.SetTooltip("Forkly " + Version)
 		mOpen := systray.AddMenuItem("打开控制台", "在浏览器中打开本地控制台")
+		mPair := systray.AddMenuItem("有待确认的 CLI 授权…", "打开设置核对配对码")
+		mPair.Hide()
 		list, _ := projects.List(context.Background())
 		statusLabel := formatTrayStatusLabel(list)
 		mStatus := systray.AddMenuItem(statusLabel, "")
@@ -213,9 +234,26 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 
 		go func() {
 			for {
+				n := len(agents.Pending())
+				if n > 0 {
+					mPair.SetTitle(fmt.Sprintf("待确认 CLI 授权（%d）", n))
+					mPair.Show()
+				} else {
+					mPair.Hide()
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+
+		go func() {
+			for {
 				select {
 				case <-mOpen.ClickedCh:
 					openConsole()
+				case <-mPair.ClickedCh:
+					if err := browser.OpenURL(api.OpenConsoleURLWithNext("/settings")); err != nil {
+						log.Error("open settings for agent pair", "err", err)
+					}
 				case <-mPause.ClickedCh:
 					_ = store.Save(func(f *config.File) error {
 						f.Preferences.BackgroundChecks = !mPause.Checked()

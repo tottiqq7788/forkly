@@ -379,7 +379,18 @@ func (rs *RemoteService) CloneAndRegister(ctx context.Context, rawURL, parentDir
 	if folderName == "" {
 		folderName = ref.Repo
 	}
+	if err := validateCloneFolderName(folderName); err != nil {
+		return ProjectView{}, err
+	}
+	parentDir = filepath.Clean(parentDir)
+	if parentDir == "" || parentDir == "." {
+		return ProjectView{}, fmt.Errorf("父目录无效")
+	}
 	dest := filepath.Join(parentDir, folderName)
+	rel, err := filepath.Rel(parentDir, dest)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ProjectView{}, fmt.Errorf("目标路径必须位于所选父目录内")
+	}
 	auth, err := rs.authEnv(snap.GitHubAccount.AccountID)
 	if err != nil {
 		return ProjectView{}, err
@@ -392,7 +403,7 @@ func (rs *RemoteService) CloneAndRegister(ctx context.Context, rawURL, parentDir
 		return ProjectView{}, err
 	}
 	now := time.Now()
-	_ = rs.Store.Save(func(f *config.File) error {
+	if err := rs.Store.Save(func(f *config.File) error {
 		for i := range f.Projects {
 			if f.Projects[i].ID == res.Project.ID {
 				f.Projects[i].Remote = &config.RemoteLink{
@@ -406,12 +417,29 @@ func (rs *RemoteService) CloneAndRegister(ctx context.Context, rawURL, parentDir
 				return nil
 			}
 		}
-		return nil
-	})
+		return fmt.Errorf("项目登记后未找到，无法写入远端关联")
+	}); err != nil {
+		return ProjectView{}, fmt.Errorf("仓库已克隆并登记，但写入 GitHub 关联失败：%w", err)
+	}
 	return ProjectView{
 		ID: res.Project.ID, Name: res.Project.Name, Path: res.Project.Path,
 		AddedAt: res.Project.AddedAt, OpenedAt: res.Project.OpenedAt, Exists: true, Summary: "无修改",
+		RemoteLinked: true, Ahead: 0, Behind: 0,
 	}, nil
+}
+
+func validateCloneFolderName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("文件夹名称无效")
+	}
+	if strings.Contains(name, string(filepath.Separator)) || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("文件夹名称不能包含路径分隔符")
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("文件夹名称无效")
+	}
+	return nil
 }
 
 func (rs *RemoteService) CreateGitHubRepo(ctx context.Context, projectID, name, description string, private bool) (RemoteStatusView, error) {

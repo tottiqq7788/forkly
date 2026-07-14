@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: CLI parity gate
+        run: bash scripts/check-cli-parity.sh
+
+      - name: Go tests
+        run: go test ./...
+
+      - name: CLI package compile check
+        run: go test ./internal/cli/...

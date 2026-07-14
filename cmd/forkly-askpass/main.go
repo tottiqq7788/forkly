@@ -20,9 +20,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "forkly-askpass: missing account")
 		os.Exit(1)
 	}
-	lower := strings.ToLower(prompt)
-	// Reject anything that doesn't look like a GitHub HTTPS credential prompt.
-	if !strings.Contains(lower, "github.com") && !strings.Contains(lower, "username") && !strings.Contains(lower, "password") {
+	if !githubAskPassAllowed(prompt) {
 		fmt.Fprintln(os.Stderr, "forkly-askpass: unexpected prompt")
 		os.Exit(1)
 	}
@@ -32,6 +30,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "forkly-askpass: credential unavailable")
 		os.Exit(1)
 	}
+	lower := strings.ToLower(prompt)
 	if strings.Contains(lower, "username") {
 		login := secret.Login
 		if envLogin := strings.TrimSpace(os.Getenv("FORKLY_ASKPASS_LOGIN")); envLogin != "" {

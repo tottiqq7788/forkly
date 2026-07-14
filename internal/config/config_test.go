@@ -71,8 +71,8 @@ func TestMigrateV1ToV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := s.Snapshot()
-	if snap.Version != 2 {
-		t.Fatalf("want v2, got %d", snap.Version)
+	if snap.Version != Version {
+		t.Fatalf("want v%d, got %d", Version, snap.Version)
 	}
 	if snap.Preferences.Theme != "dark" || len(snap.Projects) != 1 {
 		t.Fatalf("%+v", snap)

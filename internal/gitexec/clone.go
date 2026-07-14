@@ -36,14 +36,14 @@ func (e *Executor) Clone(ctx context.Context, rawURL, dest string, auth AuthEnv)
 		return fmt.Errorf("无法创建父目录：%w", err)
 	}
 	res, err := e.Run(ctx, RunOpts{
-		Args:     []string{"clone", "--", ref.URL, dest},
+		Args:     authGitArgs([]string{"clone", "--", ref.URL, dest}),
 		Write:    true,
 		Repo:     parent, // serialize by parent path
 		Timeout:  10 * time.Minute,
 		ExtraEnv: auth.env(),
 	})
 	if err != nil {
-		return mapRemoteGitError(string(res.Stderr), err, isTimeout(err))
+		return fmt.Errorf("%w（若已生成部分目录，仍保留在 %s，请手动检查后删除）", mapRemoteGitError(string(res.Stderr), err, isTimeout(err)), dest)
 	}
 	return nil
 }

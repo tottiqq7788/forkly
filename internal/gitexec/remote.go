@@ -74,6 +74,12 @@ func (a AuthEnv) env() []string {
 	return out
 }
 
+// authGitArgs disables the user's credential helpers for one invocation so a
+// token answered via AskPass is not persisted into ~/.git-credentials / OS stores.
+func authGitArgs(args []string) []string {
+	return append([]string{"-c", "credential.helper="}, args...)
+}
+
 // ParseGitHubHTTPSURL accepts https GitHub remotes only (no credentials in URL).
 func ParseGitHubHTTPSURL(raw string) (GitHubRepoRef, error) {
 	raw = strings.TrimSpace(raw)
@@ -251,7 +257,8 @@ func assertRemoteName(name string) error {
 }
 
 // EnsureSafeGitHubRemote verifies the named remote still points at GitHub HTTPS
-// without embedded credentials before injecting AskPass.
+// without embedded credentials before injecting AskPass. Both fetch and push
+// URLs are checked so a malicious pushurl cannot siphon the token.
 func (e *Executor) EnsureSafeGitHubRemote(ctx context.Context, repo, name string) (GitHubRepoRef, error) {
 	remotes, err := e.ListRemotes(ctx, repo)
 	if err != nil {
@@ -261,9 +268,31 @@ func (e *Executor) EnsureSafeGitHubRemote(ctx context.Context, repo, name string
 		if r.Name != name {
 			continue
 		}
-		return ParseGitHubHTTPSURL(r.FetchURL)
+		ref, err := ParseGitHubHTTPSURL(r.FetchURL)
+		if err != nil {
+			return GitHubRepoRef{}, err
+		}
+		pushURL := strings.TrimSpace(r.PushURL)
+		if pushURL != "" && !urlsEquivalentGitHub(pushURL, ref) {
+			pushRef, perr := ParseGitHubHTTPSURL(pushURL)
+			if perr != nil {
+				return GitHubRepoRef{}, remoteErr(ErrCodeUnsupportedRemote, "远端 pushurl 不是安全的 GitHub HTTPS 地址，已拒绝认证")
+			}
+			if pushRef.Owner != ref.Owner || pushRef.Repo != ref.Repo {
+				return GitHubRepoRef{}, remoteErr(ErrCodeUnsupportedRemote, "远端 fetchurl 与 pushurl 指向不同仓库，已拒绝认证")
+			}
+		}
+		return ref, nil
 	}
 	return GitHubRepoRef{}, remoteErr(ErrCodeRepositoryNotFound, fmt.Sprintf("找不到远端「%s」", name))
+}
+
+func urlsEquivalentGitHub(raw string, expect GitHubRepoRef) bool {
+	ref, err := ParseGitHubHTTPSURL(raw)
+	if err != nil {
+		return false
+	}
+	return ref.Owner == expect.Owner && ref.Repo == expect.Repo
 }
 
 func (e *Executor) RemoteSyncStatus(ctx context.Context, repo, remoteName string) (SyncStatus, error) {
@@ -406,7 +435,7 @@ func (e *Executor) Fetch(ctx context.Context, repo, remote string, auth AuthEnv)
 	}
 	res, err := e.Run(ctx, RunOpts{
 		Repo:     repo,
-		Args:     []string{"fetch", "--prune", "--no-recurse-submodules", remote},
+		Args:     authGitArgs([]string{"fetch", "--prune", "--no-recurse-submodules", remote}),
 		Write:    true,
 		Timeout:  180 * time.Second,
 		ExtraEnv: auth.env(),
@@ -506,7 +535,7 @@ func (e *Executor) Push(ctx context.Context, repo, remote, branch string, setUps
 	args = append(args, remote, "refs/heads/"+branch+":refs/heads/"+branch)
 	res, err := e.Run(ctx, RunOpts{
 		Repo:     repo,
-		Args:     args,
+		Args:     authGitArgs(args),
 		Write:    true,
 		Timeout:  180 * time.Second,
 		ExtraEnv: auth.env(),

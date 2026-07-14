@@ -16,6 +16,14 @@ func NewKeychainStore() *KeychainStore {
 	return &KeychainStore{service: ServiceName}
 }
 
+// NewKeychainStoreForService stores secrets under a distinct OS keychain service name.
+func NewKeychainStoreForService(service string) *KeychainStore {
+	if service == "" {
+		service = ServiceName
+	}
+	return &KeychainStore{service: service}
+}
+
 func (k *KeychainStore) Set(accountID string, secret Secret) error {
 	if accountID == "" {
 		return fmt.Errorf("account id required")

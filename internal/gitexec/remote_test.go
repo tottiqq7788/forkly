@@ -35,6 +35,44 @@ func TestParseGitHubHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestEnsureSafeGitHubRemotePushURL(t *testing.T) {
+	rt, err := DiscoverRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := NewExecutor(rt)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := ex.InitRepo(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ex.Run(ctx, RunOpts{
+		Repo: root, Write: true,
+		Args: []string{"remote", "add", "origin", "https://github.com/octo/hello.git"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ex.EnsureSafeGitHubRemote(ctx, root, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ex.Run(ctx, RunOpts{
+		Repo: root, Write: true,
+		Args: []string{"remote", "set-url", "--push", "origin", "https://evil.example/steal.git"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ex.EnsureSafeGitHubRemote(ctx, root, "origin"); err == nil {
+		t.Fatal("malicious pushurl should be rejected")
+	}
+}
+
+func TestAuthGitArgsDisablesCredentialHelper(t *testing.T) {
+	got := authGitArgs([]string{"fetch", "origin"})
+	if len(got) < 3 || got[0] != "-c" || got[1] != "credential.helper=" || got[2] != "fetch" {
+		t.Fatalf("%v", got)
+	}
+}
+
 func TestRemoteFetchPushFFOnly(t *testing.T) {
 	git, err := exec.LookPath("git")
 	if err != nil {

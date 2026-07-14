@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/forkly-app/forkly/internal/agentauth"
 	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/credentials"
 	"github.com/forkly-app/forkly/internal/diagnostics"
@@ -17,6 +18,7 @@ import (
 	"github.com/forkly-app/forkly/internal/localfile"
 	"github.com/forkly-app/forkly/internal/operation"
 	"github.com/forkly-app/forkly/internal/project"
+	"github.com/forkly-app/forkly/internal/runtimeinfo"
 	"github.com/forkly-app/forkly/internal/session"
 	"github.com/forkly-app/forkly/internal/watcher"
 )
@@ -80,6 +82,7 @@ func StartServerOnly(ctx context.Context, log *diagnostics.Logger, opts ServerOn
 	localFiles := localfile.NewService(git)
 	// Server-only / tests use in-memory credentials to stay hermetic.
 	credStore := credentials.Store(credentials.NewMemoryStore())
+	agentCreds := credentials.Store(credentials.NewMemoryStore())
 	githubClient := gh.NewClient(credStore)
 	ops := operation.NewManager()
 	remotes := &project.RemoteService{
@@ -88,6 +91,7 @@ func StartServerOnly(ctx context.Context, log *diagnostics.Logger, opts ServerOn
 		Git:      git,
 		GitHub:   githubClient,
 	}
+	agents := agentauth.NewManager(store, agentCreds)
 	wm := watcher.New(nil)
 	for _, p := range store.Snapshot().Projects {
 		_ = wm.Watch(p.ID, p.Path)
@@ -95,13 +99,18 @@ func StartServerOnly(ctx context.Context, log *diagnostics.Logger, opts ServerOn
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
 		Remotes: remotes, GitHub: githubClient, Ops: ops,
-		Sessions: sessions, LocalFiles: localFiles,
+		Sessions: sessions, Agents: agents, LocalFiles: localFiles,
 		Watcher: wm, Version: Version, DevMode: opts.DevMode,
 	})
 	addr, err := api.StartWith(localapi.StartOptions{Listen: opts.Listen})
 	if err != nil {
 		wm.Close()
 		return nil, err
+	}
+	runtimeInfo, _ := runtimeinfo.New(addr, Version)
+	if runtimeInfo.Nonce != "" {
+		api.SetRuntime(runtimeInfo)
+		_ = runtimeinfo.Write(dataDir, runtimeInfo)
 	}
 	baseShutdown := api.Shutdown
 	return &ServerHandle{
@@ -111,6 +120,9 @@ func StartServerOnly(ctx context.Context, log *diagnostics.Logger, opts ServerOn
 		api:        api,
 		Shutdown: func(c context.Context) error {
 			ops.CancelAll()
+			if runtimeInfo.Nonce != "" {
+				_ = runtimeinfo.RemoveIfOwner(dataDir, runtimeInfo)
+			}
 			err := baseShutdown(c)
 			wm.Close()
 			return err

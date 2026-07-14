@@ -22,6 +22,7 @@ web:
 build: web
 	CGO_ENABLED=1 go build -ldflags "-X github.com/forkly-app/forkly/internal/app.Version=$(VERSION) -X github.com/forkly-app/forkly/internal/github.ClientID=$(FORKLY_GITHUB_CLIENT_ID)" -o bin/forkly ./cmd/forkly
 	CGO_ENABLED=1 go build -o bin/forkly-askpass ./cmd/forkly-askpass
+	CGO_ENABLED=0 go build -ldflags "-X github.com/forkly-app/forkly/internal/cli.Version=$(VERSION)" -o bin/forklyctl ./cmd/forklyctl
 
 FORKLY_GITHUB_CLIENT_ID ?=
 

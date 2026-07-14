@@ -9,6 +9,7 @@ import (
 )
 
 const ServiceName = "app.forkly.desktop.github"
+const AgentServiceName = "app.forkly.desktop.agent"
 
 // ErrNotFound means no credential exists for the given account.
 var ErrNotFound = errors.New("credential not found")

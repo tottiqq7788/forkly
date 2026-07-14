@@ -10,13 +10,21 @@ import (
 	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/gitexec"
 	"github.com/forkly-app/forkly/internal/project"
+	"github.com/forkly-app/forkly/internal/runtimeinfo"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	rt := s.deps.Git.Runtime()
+	pid, nonce := s.RuntimeIdentity()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"version": s.deps.Version,
+		"ok":         true,
+		"version":    s.deps.Version,
+		"apiVersion": runtimeinfo.APIVersion,
+		"pid":        pid,
+		"nonce":      nonce,
+		"capabilities": []string{
+			"projects", "files", "commit", "branches", "github", "agent",
+		},
 		"git": map[string]any{
 			"version": rt.Version,
 			"bundled": rt.Bundled,

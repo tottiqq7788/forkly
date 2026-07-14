@@ -15,7 +15,8 @@ import (
 // Version is the current config schema.
 // v1: projects + identity + preferences
 // v2: + GitHub account metadata + per-project remote link (no secrets)
-const Version = 2
+// v3: + Agent CLI client metadata (token hashes only; secrets in keychain)
+const Version = 3
 
 type ProjectEntry struct {
 	ID       string    `json:"id"`
@@ -52,6 +53,18 @@ type GitHubAccountMeta struct {
 	AvatarURL string    `json:"avatarUrl,omitempty"`
 	AuthKind  string    `json:"authKind"` // "oauth" | "pat"
 	LinkedAt  time.Time `json:"linkedAt"`
+}
+
+// AgentClientMeta is non-secret metadata for a paired CLI/Agent client.
+// The bearer token itself lives in the OS keychain under AgentServiceName.
+type AgentClientMeta struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Scopes     []string   `json:"scopes"`
+	Preset     string     `json:"preset,omitempty"`
+	TokenHash  string     `json:"tokenHash"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 }
 
 // DefaultHideRule hides common macOS Finder metadata files in the files tree.
@@ -101,6 +114,7 @@ type File struct {
 	Identity      GitIdentity         `json:"identity"`
 	Preferences   Preferences         `json:"preferences"`
 	GitHubAccount *GitHubAccountMeta  `json:"githubAccount,omitempty"`
+	AgentClients  []AgentClientMeta   `json:"agentClients,omitempty"`
 }
 
 type Store struct {
@@ -204,6 +218,13 @@ func migrateFile(f *File) bool {
 		f.Version = 2
 		changed = true
 	}
+	if f.Version < 3 {
+		if f.AgentClients == nil {
+			f.AgentClients = []AgentClientMeta{}
+		}
+		f.Version = 3
+		changed = true
+	}
 	if f.Version > Version {
 		// Future schema: keep what we can; still mark current.
 		f.Version = Version
@@ -253,6 +274,19 @@ func cloneFile(src File) File {
 	if src.GitHubAccount != nil {
 		a := *src.GitHubAccount
 		cp.GitHubAccount = &a
+	}
+	if src.AgentClients != nil {
+		cp.AgentClients = make([]AgentClientMeta, len(src.AgentClients))
+		for i, c := range src.AgentClients {
+			cp.AgentClients[i] = c
+			if c.Scopes != nil {
+				cp.AgentClients[i].Scopes = append([]string(nil), c.Scopes...)
+			}
+			if c.LastUsedAt != nil {
+				t := *c.LastUsedAt
+				cp.AgentClients[i].LastUsedAt = &t
+			}
+		}
 	}
 	return cp
 }

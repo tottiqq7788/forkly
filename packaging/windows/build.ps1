@@ -42,6 +42,8 @@ $env:CGO_ENABLED = "1"
 $ldflags = "-H windowsgui -X github.com/forkly-app/forkly/internal/app.Version=$Version -X github.com/forkly-app/forkly/internal/github.ClientID=$env:FORKLY_GITHUB_CLIENT_ID"
 go build -ldflags $ldflags -o (Join-Path $appDir "Forkly.exe") .\cmd\forkly
 go build -o (Join-Path $appDir "forkly-askpass.exe") .\cmd\forkly-askpass
+$ctlLdflags = "-X github.com/forkly-app/forkly/internal/cli.Version=$Version"
+go build -ldflags $ctlLdflags -o (Join-Path $appDir "forklyctl.exe") .\cmd\forklyctl
 
 Write-Host "== Stage runtime files =="
 Copy-Item -Recurse -Force (Join-Path $root "third_party\git") (Join-Path $appDir "git")

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { GitHubAccountPanel } from "../components/github/GitHubAccountPanel";
+import { AgentClientsPanel } from "../components/settings/AgentClientsPanel";
 
 type Settings = {
   identity: { name: string; email: string };
@@ -89,6 +90,11 @@ export default function SettingsPage() {
       </section>
 
       <section className="space-y-3">
+        <h2 className="font-medium">命令行与 AI 工具</h2>
+        <AgentClientsPanel />
+      </section>
+
+      <section className="space-y-3">
         <h2 className="font-medium">外观</h2>
         <div className="flex gap-3 text-sm">
           {(["system", "light", "dark"] as const).map((t) => (
@@ -128,7 +134,7 @@ export default function SettingsPage() {
 
       <section>
         <h2 className="font-medium mb-1">关于</h2>
-        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.47 · 本地可视化 Git</p>
+        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.48 · 本地可视化 Git</p>
       </section>
 
       <div className="flex items-center gap-3">
