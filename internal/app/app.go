@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,7 +22,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.44"
+var Version = "0.1.45"
 
 // LaunchPaths holds Markdown paths collected before the app is fully ready.
 type LaunchOptions struct {
@@ -104,14 +103,24 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	}
 
 	openLocalFiles := func(paths []string) {
+		deps := openTargetDeps{
+			git:        git,
+			projects:   projects,
+			localFiles: localFiles,
+			log:        log,
+		}
 		for _, p := range dedupeRecentMarkdownPaths(filterMarkdownPaths(paths)) {
-			meta, err := localFiles.Open(p)
+			target, err := resolveOpenDocumentTarget(context.Background(), deps, p)
 			if err != nil {
 				log.Error("open local markdown", "path", p, "err", err)
 				continue
 			}
-			next := "/editor/local/" + url.PathEscape(meta.FileID)
-			openURL := api.OpenConsoleURLWithNext(next)
+			if target.ProjectCreated && target.ProjectID != "" {
+				if err := wm.Watch(target.ProjectID, target.ProjectPath); err != nil {
+					log.Error("watch auto-registered project", "id", target.ProjectID, "err", err)
+				}
+			}
+			openURL := api.OpenConsoleURLWithNext(target.Next)
 			if err := browser.OpenURL(openURL); err != nil {
 				log.Error("open browser for local file", "path", p, "err", err)
 			}

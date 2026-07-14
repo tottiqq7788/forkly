@@ -236,6 +236,75 @@ func (s *Service) Remove(id string) error {
 	})
 }
 
+// EnsureResult is the outcome of EnsureRegistered.
+type EnsureResult struct {
+	Project config.ProjectEntry
+	Created bool
+}
+
+// EnsureRegistered reuses a registered project for repoPath or atomically adds
+// one. It never runs git init, never clears history, and refuses bare repos.
+func (s *Service) EnsureRegistered(ctx context.Context, repoPath string) (EnsureResult, error) {
+	path := filepath.Clean(strings.TrimSpace(repoPath))
+	if path == "" || path == "." {
+		return EnsureResult{}, fmt.Errorf("路径无效")
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return EnsureResult{}, fmt.Errorf("无法访问路径：%w", err)
+	}
+	if !st.IsDir() {
+		return EnsureResult{}, fmt.Errorf("请选择文件夹")
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+
+	isRepo, err := s.git.IsRepo(ctx, path)
+	if err != nil {
+		return EnsureResult{}, fmt.Errorf("无法确认 Git 工作区：%w", err)
+	}
+	if !isRepo {
+		return EnsureResult{}, fmt.Errorf("不是 Git 工作区")
+	}
+	health, err := s.git.Health(ctx, path)
+	if err != nil {
+		return EnsureResult{}, fmt.Errorf("无法读取仓库健康状态：%w", err)
+	}
+	if health.Bare {
+		return EnsureResult{}, fmt.Errorf("不支持 bare 仓库")
+	}
+
+	var out EnsureResult
+	err = s.store.Save(func(f *config.File) error {
+		now := time.Now()
+		for i := range f.Projects {
+			if samePath(f.Projects[i].Path, path) {
+				f.Projects[i].OpenedAt = now
+				out.Project = f.Projects[i]
+				out.Created = false
+				return nil
+			}
+		}
+		entry := config.ProjectEntry{
+			ID:        session.RandomURLSafe(12),
+			Name:      filepath.Base(path),
+			Path:      path,
+			AddedAt:   now,
+			OpenedAt:  now,
+			HideRules: []string{config.DefaultHideRule},
+		}
+		f.Projects = append([]config.ProjectEntry{entry}, f.Projects...)
+		out.Project = entry
+		out.Created = true
+		return nil
+	})
+	if err != nil {
+		return EnsureResult{}, err
+	}
+	return out, nil
+}
+
 func (s *Service) Get(id string) (config.ProjectEntry, error) {
 	for _, p := range s.store.Snapshot().Projects {
 		if p.ID == id {
