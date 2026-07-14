@@ -44,4 +44,22 @@ describe("MarkdownCategoryToolbar", () => {
     expect(screen.getByText("打开快速插入菜单")).toBeInTheDocument();
     expect(onCommand).not.toHaveBeenCalled();
   });
+
+  it("keeps format commands enabled in source mode", async () => {
+    const onCommand = vi.fn();
+    const user = userEvent.setup();
+    render(<MarkdownCategoryToolbar onCommand={onCommand} sourceMode />);
+
+    await user.hover(screen.getByRole("button", { name: "标题样式" }));
+    const heading = await screen.findByRole("menuitem", { name: "标题 1" });
+    expect(heading).not.toBeDisabled();
+    await user.click(heading);
+    expect(onCommand).toHaveBeenCalledWith("para:heading 1");
+
+    await user.hover(screen.getByRole("button", { name: "文字样式" }));
+    const strong = await screen.findByRole("menuitem", { name: "粗体" });
+    expect(strong).not.toBeDisabled();
+    await user.click(strong);
+    expect(onCommand).toHaveBeenCalledWith("strong");
+  });
 });

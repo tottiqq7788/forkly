@@ -22,6 +22,9 @@ const cmApi = {
     to: () => ({ line: 0, ch: 7 }),
   })),
   replaceRange: vi.fn(),
+  operation: vi.fn((fn: () => void) => fn()),
+  lastLine: vi.fn(() => 2),
+  getLine: vi.fn((line: number) => ["# Title", "", "body"][line] ?? ""),
 };
 
 vi.mock("codemirror", () => {
@@ -55,11 +58,17 @@ describe("MarkdownSourceEditorView", () => {
     cmApi.on.mockReset();
     cmApi.getSearchCursor.mockReset();
     cmApi.replaceRange.mockReset();
+    cmApi.operation.mockReset();
+    cmApi.lastLine.mockReset();
+    cmApi.getLine.mockReset();
 
     cmApi.getValue.mockReturnValue("# Title\n\nbody");
     cmApi.getCursor.mockReturnValue({ line: 0, ch: 0 });
     cmApi.getScrollInfo.mockReturnValue({ left: 0, top: 0 });
     cmApi.heightAtLine.mockReturnValue(12);
+    cmApi.operation.mockImplementation((fn: () => void) => fn());
+    cmApi.lastLine.mockReturnValue(2);
+    cmApi.getLine.mockImplementation((line: number) => ["# Title", "", "body"][line] ?? "");
     cmApi.getSearchCursor.mockReturnValue({
       findNext: searchCursorFindNext,
       from: () => ({ line: 0, ch: 2 }),
@@ -126,5 +135,52 @@ describe("MarkdownSourceEditorView", () => {
       );
     });
     expect(document.querySelector('[data-language-mode="text/plain"]')).toBeTruthy();
+  });
+
+  it("applies format commands through a single undoable replaceRange", async () => {
+    const ref = createRef<Handle>();
+    const onChange = vi.fn();
+    render(<MarkdownSourceEditorView ref={ref} markdown="Title" onChange={onChange} />);
+    await waitFor(() => expect(ref.current).toBeTruthy());
+
+    cmApi.getValue.mockReturnValue("Title");
+    cmApi.getCursor.mockImplementation((side?: string) =>
+      side === "anchor" || side === "head" || !side ? { line: 0, ch: 0 } : { line: 0, ch: 0 },
+    );
+    cmApi.lastLine.mockReturnValue(0);
+    cmApi.getLine.mockReturnValue("Title");
+
+    expect(ref.current?.applyFormatCommand("para:heading 1")).toBe(true);
+    // Prefix-only change: insert "# " at the start rather than rewriting the whole doc.
+    expect(cmApi.replaceRange).toHaveBeenCalledWith(
+      "# ",
+      { line: 0, ch: 0 },
+      { line: 0, ch: 0 },
+    );
+    expect(cmApi.setSelection).toHaveBeenCalled();
+    expect(cmApi.focus).toHaveBeenCalled();
+  });
+
+  it("inserts snippets with a selectable sub-range", async () => {
+    const ref = createRef<Handle>();
+    render(<MarkdownSourceEditorView ref={ref} markdown="" />);
+    await waitFor(() => expect(ref.current).toBeTruthy());
+
+    cmApi.getValue.mockReturnValue("");
+    cmApi.getCursor.mockReturnValue({ line: 0, ch: 0 });
+    cmApi.lastLine.mockReturnValue(0);
+    cmApi.getLine.mockReturnValue("");
+
+    ref.current?.insertSnippet("![描述](地址)", { start: 6, end: 8 });
+    expect(cmApi.replaceRange).toHaveBeenCalledWith(
+      "![描述](地址)",
+      { line: 0, ch: 0 },
+      { line: 0, ch: 0 },
+    );
+    expect(cmApi.setSelection).toHaveBeenCalledWith(
+      { line: 0, ch: 6 },
+      { line: 0, ch: 8 },
+      { scroll: true },
+    );
   });
 });

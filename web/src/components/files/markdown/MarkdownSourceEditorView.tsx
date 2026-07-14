@@ -11,6 +11,11 @@ import "codemirror/addon/search/searchcursor";
 import "codemirror/addon/selection/active-line";
 import "./markdown-source.css";
 import type { SearchOpts, SearchResult } from "./MarkdownEditorView";
+import {
+  applySourceFormatCommand,
+  insertSnippet,
+  type SourceSelection,
+} from "./sourceFormatCommands";
 
 export type IndexCursor = {
   anchor: { line: number; ch: number };
@@ -25,6 +30,13 @@ export type MarkdownSourceEditorHandle = {
   focus: () => void;
   undo: () => void;
   redo: () => void;
+  /** Apply a MarkdownCategoryToolbar FormatCommand to the current selection. */
+  applyFormatCommand: (command: string) => boolean;
+  /** Replace the current selection with a snippet and optionally select a sub-range. */
+  insertSnippet: (
+    snippet: string,
+    select?: { start: number; end: number },
+  ) => void;
   search: (value: string, opts?: SearchOpts) => SearchResult;
   find: (action: "previous" | "next") => SearchResult;
   replace: (value: string, opt?: { isSingle?: boolean; isRegexp?: boolean }) => SearchResult;
@@ -67,6 +79,53 @@ type EditorWithSearch = CodeMirror.Editor & {
 };
 
 const EMPTY_SEARCH: SearchResult = { matches: [], index: -1 };
+
+/** One undoable replace that preserves CodeMirror history without rewriting unchanged edges. */
+function applyTextAndSelection(
+  cm: CodeMirror.Editor,
+  text: string,
+  selection: SourceSelection,
+) {
+  const previous = cm.getValue();
+  cm.operation(() => {
+    if (previous === text) {
+      cm.setSelection(selection.anchor, selection.head, { scroll: true });
+      return;
+    }
+    let start = 0;
+    const minLen = Math.min(previous.length, text.length);
+    while (start < minLen && previous.charCodeAt(start) === text.charCodeAt(start)) {
+      start += 1;
+    }
+    let endOld = previous.length;
+    let endNew = text.length;
+    while (
+      endOld > start &&
+      endNew > start &&
+      previous.charCodeAt(endOld - 1) === text.charCodeAt(endNew - 1)
+    ) {
+      endOld -= 1;
+      endNew -= 1;
+    }
+    const from = offsetToPos(previous, start);
+    const to = offsetToPos(previous, endOld);
+    cm.replaceRange(text.slice(start, endNew), from, to);
+    cm.setSelection(selection.anchor, selection.head, { scroll: true });
+  });
+  cm.focus();
+}
+
+function offsetToPos(text: string, offset: number): CodeMirror.Position {
+  let remaining = Math.max(0, offset);
+  const lines = text.split("\n");
+  for (let line = 0; line < lines.length; line++) {
+    const len = lines[line].length;
+    if (remaining <= len) return { line, ch: remaining };
+    remaining -= len + 1;
+  }
+  const last = Math.max(lines.length - 1, 0);
+  return { line: last, ch: (lines[last] ?? "").length };
+}
 
 export const MarkdownSourceEditorView = forwardRef<MarkdownSourceEditorHandle, Props>(
   function MarkdownSourceEditorView(
@@ -118,6 +177,28 @@ export const MarkdownSourceEditorView = forwardRef<MarkdownSourceEditorHandle, P
       focus: () => cmRef.current?.focus(),
       undo: () => cmRef.current?.execCommand("undo"),
       redo: () => cmRef.current?.execCommand("redo"),
+      applyFormatCommand: (command) => {
+        const cm = cmRef.current;
+        if (!cm) return false;
+        const selection: SourceSelection = {
+          anchor: cm.getCursor("anchor"),
+          head: cm.getCursor("head"),
+        };
+        const result = applySourceFormatCommand(cm.getValue(), selection, command);
+        if (!result) return false;
+        applyTextAndSelection(cm, result.text, result.selection);
+        return true;
+      },
+      insertSnippet: (snippet, select) => {
+        const cm = cmRef.current;
+        if (!cm) return;
+        const selection: SourceSelection = {
+          anchor: cm.getCursor("anchor"),
+          head: cm.getCursor("head"),
+        };
+        const result = insertSnippet(cm.getValue(), selection, snippet, select);
+        applyTextAndSelection(cm, result.text, result.selection);
+      },
       search: (value, opts) => runSearch(cmRef.current, searchRef.current, value, opts),
       find: (action) => stepSearch(cmRef.current, searchRef.current, action),
       replace: (value, opt) =>

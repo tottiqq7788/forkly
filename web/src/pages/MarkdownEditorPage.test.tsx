@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { MarkdownSaveGuardProvider } from "../components/files/markdown/MarkdownSaveGuard";
@@ -21,6 +22,8 @@ const editorSetCursorByOffset = vi.fn();
 const sourceUndo = vi.fn();
 const sourceRedo = vi.fn();
 const sourceFind = vi.fn();
+const sourceApplyFormatCommand = vi.fn((..._args: unknown[]) => true);
+const sourceInsertSnippet = vi.fn((..._args: unknown[]) => undefined);
 let fakeMarkdown = "# Hello";
 
 vi.mock("../api", async () => {
@@ -137,6 +140,31 @@ vi.mock("../components/files/markdown/MarkdownSourceEditorView", async () => {
       focus: () => undefined,
       undo: (...args: unknown[]) => sourceUndo(...args),
       redo: (...args: unknown[]) => sourceRedo(...args),
+      applyFormatCommand: (...args: unknown[]) => {
+        const ok = sourceApplyFormatCommand(...args);
+        if (ok) {
+          const cmd = String(args[0] ?? "");
+          setValue((prev) => {
+            const next = cmd.startsWith("para:heading")
+              ? `# ${prev.replace(/^#+\s*/, "")}`
+              : `**${prev}**`;
+            valueRef.current = next;
+            return next;
+          });
+          onChange?.();
+        }
+        return ok;
+      },
+      insertSnippet: (...args: unknown[]) => {
+        sourceInsertSnippet(...args);
+        const snippet = String(args[0] ?? "");
+        setValue((prev) => {
+          const next = prev + snippet;
+          valueRef.current = next;
+          return next;
+        });
+        onChange?.();
+      },
       search: () => ({ matches: [], index: -1 }),
       find: (...args: unknown[]) => sourceFind(...args),
       replace: () => ({ matches: [], index: -1 }),
@@ -231,6 +259,9 @@ describe("MarkdownEditorPage", () => {
     sourceUndo.mockReset();
     sourceRedo.mockReset();
     sourceFind.mockReset();
+    sourceApplyFormatCommand.mockReset();
+    sourceInsertSnippet.mockReset();
+    sourceApplyFormatCommand.mockReturnValue(true);
     editorFind.mockReturnValue({ matches: [], index: -1 });
     editorReplaceContent.mockReturnValue(true);
     editorSetCursorByOffset.mockReturnValue(true);
@@ -606,5 +637,67 @@ describe("MarkdownEditorPage", () => {
       new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true }),
     );
     expect(sourceRedo).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes toolbar format commands to the source editor", async () => {
+    const user = userEvent.setup();
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    fireEvent.click(await screen.findByRole("button", { name: "源码" }));
+    expect(await screen.findByTestId("markdown-source-editor")).toBeInTheDocument();
+
+    await user.hover(screen.getByRole("button", { name: "标题样式" }));
+    await user.click(await screen.findByRole("menuitem", { name: "标题 2" }));
+    expect(sourceApplyFormatCommand).toHaveBeenCalledWith("para:heading 2");
+    expect(editorUpdateParagraph).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status", { name: "未保存" })).toBeInTheDocument();
+  });
+
+  it("inserts an image template for plain text source documents", async () => {
+    const user = userEvent.setup();
+    fetchFileContent.mockResolvedValue({
+      path: "notes.txt",
+      source: "worktree",
+      kind: "text",
+      content: "hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=notes.txt");
+    expect(await screen.findByTestId("markdown-source-editor")).toBeInTheDocument();
+
+    await user.hover(screen.getByRole("button", { name: "插入内容" }));
+    await user.click(await screen.findByRole("menuitem", { name: "图片" }));
+    expect(sourceInsertSnippet).toHaveBeenCalledWith("![描述](地址)", { start: 6, end: 8 });
+    expect(await screen.findByRole("status", { name: "未保存" })).toBeInTheDocument();
+  });
+
+  it("keeps WYSIWYG toolbar format routing on the Muya editor", async () => {
+    const user = userEvent.setup();
+    fetchFileContent.mockResolvedValue({
+      path: "docs/a.md",
+      source: "worktree",
+      kind: "text",
+      content: "# Hello",
+      editable: true,
+      revision: "abc",
+    });
+
+    renderAt("/projects/p1/editor?path=docs%2Fa.md");
+    expect(await screen.findByTestId("fake-editor")).toBeInTheDocument();
+
+    await user.hover(screen.getByRole("button", { name: "文字样式" }));
+    await user.click(await screen.findByRole("menuitem", { name: "粗体" }));
+    expect(editorFormat).toHaveBeenCalledWith("strong");
+    expect(sourceApplyFormatCommand).not.toHaveBeenCalled();
   });
 });

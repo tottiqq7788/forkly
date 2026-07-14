@@ -27,6 +27,7 @@ import {
   findMarkdownHeadingLine,
   findMarkdownHeadingLines,
 } from "../components/files/markdown/sourceModeToc";
+import { sanitizeMarkdownLabel } from "../components/files/markdown/sourceFormatCommands";
 import { useMarkdownDocument } from "../components/files/markdown/useMarkdownDocument";
 import { useRegisterMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { isMarkdownPath } from "../components/files/markdown/isMarkdown";
@@ -53,6 +54,35 @@ const MarkdownSourceEditorView = lazy(async () => {
 const TOC_NAV_LOCK_MS = 2000;
 const SCROLL_RESTORE_WATCH_MS = 4000;
 const EDITOR_ROOT_SELECTOR = ".forkly-markdown-editor";
+
+function pickImageFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/gif,image/webp";
+    input.style.display = "none";
+    let settled = false;
+    const finish = (file: File | null) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(file);
+    };
+    input.addEventListener("change", () => {
+      finish(input.files?.[0] ?? null);
+    });
+    // If the user cancels, some browsers never fire change; settle on focus return.
+    window.addEventListener(
+      "focus",
+      () => {
+        window.setTimeout(() => finish(null), 300);
+      },
+      { once: true },
+    );
+    document.body.appendChild(input);
+    input.click();
+  });
+}
 
 const SAVE_STATUS_LABEL: Record<string, string> = {
   clean: "已保存",
@@ -781,10 +811,6 @@ export function MarkdownEditorWorkspace({
   }
 
   function handleCommand(cmd: FormatCommand) {
-    if (!isMarkdownDocument && cmd === "image") {
-      setEditorError(new Error("非 Markdown 文件不支持图片上传"));
-      return;
-    }
     if (editorModeRef.current === "source") {
       const src = sourceEditorRef.current;
       if (!src) return;
@@ -819,6 +845,18 @@ export function MarkdownEditorWorkspace({
         setDraftFromEditor();
         return;
       }
+      if (cmd === "image") {
+        void handleSourceImageCommand(src);
+        return;
+      }
+      if (src.applyFormatCommand(cmd)) {
+        setDraftFromEditor();
+      }
+      return;
+    }
+
+    if (!isMarkdownDocument && cmd === "image") {
+      setEditorError(new Error("非 Markdown 文件不支持图片上传"));
       return;
     }
 
@@ -854,6 +892,32 @@ export function MarkdownEditorWorkspace({
     } else if (cmd.startsWith("para:")) ed.updateParagraph(cmd.slice(5));
     else ed.format(cmd);
     ed.focus();
+  }
+
+  async function handleSourceImageCommand(src: MarkdownSourceEditorHandle) {
+    if (!isMarkdownDocument) {
+      // Non-Markdown text: insert a literal image template; pick the URL placeholder.
+      src.insertSnippet("![描述](地址)", { start: 6, end: 8 });
+      setDraftFromEditor();
+      return;
+    }
+
+    try {
+      const file = await pickImageFile();
+      if (!file) return;
+      if (!/^(image\/(png|jpe?g|gif|webp))$/i.test(file.type)) {
+        throw new Error("仅支持 PNG/JPEG/GIF/WebP 图片上传");
+      }
+      const uploaded = await transport.uploadAsset(file, file.name);
+      const path = uploaded.relativePath;
+      const rawAlt = file.name.replace(/\.[^.]+$/, "") || "描述";
+      const alt = sanitizeMarkdownLabel(rawAlt) || "描述";
+      const snippet = `![${alt}](${path})`;
+      src.insertSnippet(snippet);
+      setDraftFromEditor();
+    } catch (err) {
+      setEditorError(err instanceof Error ? err : new Error(String(err)));
+    }
   }
 
   const handleEditorReady = useCallback(() => {
