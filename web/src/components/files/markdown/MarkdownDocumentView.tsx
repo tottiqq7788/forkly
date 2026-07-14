@@ -33,6 +33,9 @@ export function MarkdownDocumentView({
   const truncated = !!file.truncated;
   const canPreview = !truncated && file.content != null;
   const content = file.content ?? "";
+  const notice =
+    file.message ||
+    (truncated ? "仅显示部分内容" : "");
 
   const [mode, setMode] = useState<MarkdownViewerMode>(() =>
     canPreview ? viewMode : "source",
@@ -47,6 +50,12 @@ export function MarkdownDocumentView({
 
   return (
     <div>
+      {notice ? (
+        <p className="mb-3 text-sm text-[var(--color-warning-fg)]" role="status">
+          {notice}
+        </p>
+      ) : null}
+
       {file.content === "" && effectiveMode === "source" ? (
         <p className="text-sm text-[var(--color-text-secondary)]">空文件</p>
       ) : null}

@@ -27,7 +27,6 @@ import {
 import { ProjectFilesNameDialog } from "./ProjectFilesNameDialog";
 import { FilePreviewView } from "./FilePreviewView";
 import { useMarkdownSaveGuard } from "./markdown/MarkdownSaveGuard";
-import { isMarkdownPath } from "./markdown/isMarkdown";
 import type { MarkdownViewerMode } from "./markdown/MarkdownDocumentView";
 import { isGitMetaPath, parentDirsOf } from "./markdown/markdownPath";
 import { SegmentedButton, SegmentedButtonGroup } from "../ui/SegmentedButton";
@@ -442,9 +441,18 @@ export function ProjectFilesPanel({
     return `${projectPath.replace(/[\\/]+$/, "")}${sep}${relPath.split("/").join(sep)}`;
   }
 
-  const activeIsMarkdown =
-    !!activePath && isMarkdownPath(activePath) && preview.data?.kind !== "binary";
-  const previewDisabled = !!preview.data?.truncated || preview.data?.content == null;
+  // Prefer remembered mode; only fall back to source once we know preview cannot run.
+  const previewReady = !!activePath && !preview.isLoading && !!preview.data;
+  const hasTextContent =
+    !!preview.data &&
+    (preview.data.kind === "text" || preview.data.kind === "too_large") &&
+    preview.data.content != null;
+  const canMarkdownPreview = hasTextContent && !preview.data?.truncated;
+  const canSourceView = hasTextContent;
+  const effectiveViewMode: MarkdownViewerMode =
+    previewReady && mdViewMode === "preview" && !canMarkdownPreview && canSourceView
+      ? "source"
+      : mdViewMode;
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -512,20 +520,22 @@ export function ProjectFilesPanel({
             </>
           )}
         </div>
-        {activeIsMarkdown ? (
-          <SegmentedButtonGroup label="Markdown 显示模式">
-            <SegmentedButton
-              active={mdViewMode === "preview"}
-              disabled={previewDisabled}
-              onClick={() => setMdViewMode("preview")}
-            >
-              预览
-            </SegmentedButton>
-            <SegmentedButton active={mdViewMode === "source"} onClick={() => setMdViewMode("source")}>
-              源码
-            </SegmentedButton>
-          </SegmentedButtonGroup>
-        ) : null}
+        <SegmentedButtonGroup label="Markdown 显示模式">
+          <SegmentedButton
+            active={effectiveViewMode === "preview"}
+            disabled={!canMarkdownPreview}
+            onClick={() => setMdViewMode("preview")}
+          >
+            预览
+          </SegmentedButton>
+          <SegmentedButton
+            active={effectiveViewMode === "source"}
+            disabled={!canSourceView}
+            onClick={() => setMdViewMode("source")}
+          >
+            源码
+          </SegmentedButton>
+        </SegmentedButtonGroup>
         {menu ? (
           <ProjectFilesContextMenu
             state={menu}
@@ -585,7 +595,7 @@ export function ProjectFilesPanel({
               <FilePreviewView
                 file={preview.data}
                 projectID={projectID}
-                viewMode={mdViewMode}
+                viewMode={effectiveViewMode}
                 onOpenPath={openFromMarkdown}
                 pendingFragment={pendingFragment}
                 onFragmentConsumed={() => setPendingFragment("")}

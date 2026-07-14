@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectFilesPanel } from "./ProjectFilesPanel";
 
@@ -210,12 +211,12 @@ describe("ProjectFilesPanel selection", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByRole("button", { name: "预览" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await screen.findByRole("button", { name: "编辑 note.md" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "预览" })).not.toBeDisabled();
+    });
     expect(screen.getByRole("button", { name: "源码" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "编辑 note.md" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑 a.txt" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑 photo.png" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑 huge.log" })).toBeInTheDocument();
@@ -267,10 +268,103 @@ describe("ProjectFilesPanel selection", () => {
 
     await user.click(screen.getByTitle("a.txt"));
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "预览" })).toBeNull();
+      expect(screen.getByRole("group", { name: "Markdown 显示模式" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "预览" })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "源码" })).not.toBeDisabled();
     });
 
     openSpy.mockRestore();
+  });
+
+  it("keeps preview/source toggle for non-markdown text and remembers mode", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        return {
+          path: "",
+          source: "worktree",
+          entries: [
+            { name: "note.md", path: "note.md", kind: "file" },
+            { name: "readme.txt", path: "readme.txt", kind: "file" },
+            { name: "photo.png", path: "photo.png", kind: "file" },
+          ],
+          offset: 0,
+          limit: 200,
+          hasMore: false,
+        };
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        if (path === "photo.png") {
+          return { path, source: "worktree", kind: "binary", size: 12 };
+        }
+        return {
+          path,
+          source: "worktree",
+          kind: "text",
+          content: path.endsWith(".md") ? "# Note" : "# Readme\n\nplain text markdown",
+          size: 20,
+          editable: true,
+          revision: "r1",
+        };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    function Host() {
+      const [path, setPath] = useState("note.md");
+      return (
+        <ProjectFilesPanel
+          projectID="p1"
+          projectName="demo"
+          preferredPath={path}
+          onPathChange={setPath}
+        />
+      );
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Host />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "编辑 note.md" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "预览" })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    });
+    await user.click(screen.getByRole("button", { name: "源码" }));
+    expect(screen.getByRole("button", { name: "源码" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByTitle("readme.txt"));
+    await waitFor(() => {
+      expect(screen.getByTitle("readme.txt").parentElement).toHaveClass(
+        "bg-[var(--color-surface-active)]",
+      );
+      expect(screen.getByRole("button", { name: "源码" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "源码" })).not.toBeDisabled();
+    });
+    expect(await screen.findByText(/# Readme/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "预览" }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Readme" }, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByTitle("photo.png"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "预览" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "源码" })).toBeDisabled();
+      // Keep preferred mode chrome active; do not fake "源码" while neither works.
+      expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    });
+    // Preference remembered: after leaving binary, restore previous preview choice.
+    await user.click(screen.getByTitle("note.md"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "预览" })).not.toBeDisabled();
+    });
   });
 
   it("hides edit affordance in HEAD version view", async () => {

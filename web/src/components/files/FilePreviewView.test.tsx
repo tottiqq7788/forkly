@@ -60,26 +60,71 @@ describe("FilePreviewView markdown modes", () => {
     expect(await screen.findByText(/# Hello/)).toBeInTheDocument();
   });
 
-  it("does not show mode toggle for plain text", () => {
+  it("renders non-markdown text via markdown preview when requested", async () => {
     wrap(
       <FilePreviewView
-        file={{ path: "a.txt", source: "worktree", kind: "text", content: "plain" }}
+        file={{ path: "notes.txt", source: "worktree", kind: "text", content: "# Plain\n\nbody" }}
         projectID="p1"
+        viewMode="preview"
       />,
     );
-    expect(screen.queryByRole("button", { name: "预览" })).toBeNull();
-    expect(screen.getByText("plain")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Plain" }, { timeout: 5000 }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders non-markdown text as source when viewMode is source", async () => {
+    wrap(
+      <FilePreviewView
+        file={{ path: "notes.txt", source: "worktree", kind: "text", content: "# Plain\n\nbody" }}
+        projectID="p1"
+        viewMode="source"
+      />,
+    );
+    expect(await screen.findByText(/# Plain/)).toBeInTheDocument();
+  });
+
+  it("keeps binary files on the plain preview path", () => {
+    wrap(
+      <FilePreviewView
+        file={{ path: "a.bin", source: "worktree", kind: "binary", size: 12, message: "无法预览此文件" }}
+        projectID="p1"
+        viewMode="preview"
+      />,
+    );
+    expect(screen.getByText("无法预览此文件")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 
   it("forces source for truncated markdown", async () => {
     wrap(
       <FilePreviewView
-        file={mdFile({ truncated: true, content: "# partial" })}
+        file={mdFile({ truncated: true, content: "# partial", message: "文件过大，仅显示部分内容" })}
         projectID="p1"
         viewMode="preview"
       />,
     );
     expect(await screen.findByText(/# partial/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("文件过大，仅显示部分内容");
+  });
+
+  it("shows truncated notice for non-markdown text", async () => {
+    wrap(
+      <FilePreviewView
+        file={{
+          path: "big.txt",
+          source: "worktree",
+          kind: "too_large",
+          truncated: true,
+          content: "line1\nline2",
+          message: "文件过大，仅显示部分内容",
+        }}
+        projectID="p1"
+        viewMode="preview"
+      />,
+    );
+    expect(await screen.findByText(/line1/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("文件过大，仅显示部分内容");
   });
 
   it("follows viewMode when path changes", async () => {

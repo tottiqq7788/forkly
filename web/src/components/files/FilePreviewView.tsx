@@ -1,6 +1,5 @@
 import { lazy, Suspense } from "react";
 import { FileContent } from "../../api";
-import { isMarkdownPath } from "./markdown/isMarkdown";
 import type { MarkdownViewerMode } from "./markdown/MarkdownDocumentView";
 
 const MarkdownDocumentView = lazy(() => import("./markdown/MarkdownDocumentView"));
@@ -23,9 +22,8 @@ export function FilePreviewView({
   onFragmentConsumed,
 }: Props) {
   const showText = (file.kind === "text" || file.kind === "too_large") && file.content != null;
-  const isMarkdown = showText && isMarkdownPath(file.path);
 
-  if (isMarkdown && file.content != null) {
+  if (showText && file.content != null) {
     return (
       <Suspense
         fallback={<p className="text-sm text-[var(--color-text-secondary)]">加载 Markdown…</p>}
