@@ -20,7 +20,10 @@ web:
 	cd web && npm install && npm run build
 
 build: web
-	CGO_ENABLED=1 go build -ldflags "-X github.com/forkly-app/forkly/internal/app.Version=$(VERSION)" -o bin/forkly ./cmd/forkly
+	CGO_ENABLED=1 go build -ldflags "-X github.com/forkly-app/forkly/internal/app.Version=$(VERSION) -X github.com/forkly-app/forkly/internal/github.ClientID=$(FORKLY_GITHUB_CLIENT_ID)" -o bin/forkly ./cmd/forkly
+	CGO_ENABLED=1 go build -o bin/forkly-askpass ./cmd/forkly-askpass
+
+FORKLY_GITHUB_CLIENT_ID ?=
 
 test:
 	go test ./...

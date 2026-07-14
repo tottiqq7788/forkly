@@ -10,6 +10,10 @@ export type Project = {
   summary: string;
   blockers?: string[];
   kindCounts?: Record<string, number>;
+  ahead?: number;
+  behind?: number;
+  remoteLinked?: boolean;
+  remoteLabel?: string;
 };
 
 export type DashboardActivity = {
@@ -387,6 +391,8 @@ export type SessionMe = {
   identity?: { name: string; email: string };
   identityConfigured?: boolean;
   preferences?: { theme: string; backgroundChecks: boolean };
+  githubAccount?: { accountId: string; login: string; authKind?: string } | null;
+  githubOAuthConfigured?: boolean;
 };
 
 /** Load session; in Vite DEV, auto-bootstrap via /session/dev-login when no menu-bar claim. */

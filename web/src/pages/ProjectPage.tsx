@@ -18,6 +18,8 @@ import { Drawer } from "../Drawer";
 import { ProjectFilesPanel } from "../components/files/ProjectFilesPanel";
 import { useMarkdownSaveGuard } from "../components/files/markdown/MarkdownSaveGuard";
 import { BranchDrawer } from "../components/branches/BranchDrawer";
+import { ProjectSettingsDrawer } from "../components/settings/ProjectSettingsDrawer";
+import { fetchRemoteStatus } from "../githubApi";
 import {
   ChangeTreeContextMenu,
   type ChangeTreeContextMenuState,
@@ -65,19 +67,15 @@ export default function ProjectPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(false);
-  const [removeConfirm, setRemoveConfirm] = useState(false);
   const [pendingProjectID, setPendingProjectID] = useState("");
   const [switchCloseSignal, setSwitchCloseSignal] = useState(0);
   const [message, setMessage] = useState("");
   const [err, setErr] = useState("");
-  const [settingsErr, setSettingsErr] = useState("");
   const [identityName, setIdentityName] = useState("");
   const [identityEmail, setIdentityEmail] = useState("");
   const [identityErr, setIdentityErr] = useState("");
 
   const [refreshing, setRefreshing] = useState(false);
-  const [hideRulesText, setHideRulesText] = useState("*.DS*");
-  const [hideRulesSaved, setHideRulesSaved] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [filesBranchKey, setFilesBranchKey] = useState("");
   const [changeCollapsed, setChangeCollapsed] = useState<Set<string>>(() => new Set());
@@ -95,15 +93,11 @@ export default function ProjectPage() {
     setAddOpen(false);
     setSettingsOpen(false);
     setIdentityOpen(false);
-    setRemoveConfirm(false);
     setPendingProjectID("");
     setMessage("");
     setErr("");
-    setSettingsErr("");
     setIdentityErr("");
     setRefreshing(false);
-    setHideRulesText("*.DS*");
-    setHideRulesSaved(false);
     setBranchOpen(false);
     setFilesBranchKey("");
     setChangeCollapsed(new Set());
@@ -158,11 +152,12 @@ export default function ProjectPage() {
       ),
   });
 
-  useEffect(() => {
-    if (!project.data) return;
-    const rules = project.data.hideRules ?? ["*.DS*"];
-    setHideRulesText(rules.join("\n"));
-  }, [project.data]);
+  const remote = useQuery({
+    queryKey: ["remote", id],
+    queryFn: () => fetchRemoteStatus(id),
+    enabled: !!id,
+    refetchInterval: 15000,
+  });
 
   const status = useQuery({
     queryKey: ["status", id],
@@ -200,6 +195,7 @@ export default function ProjectPage() {
         activePath ? diff.refetch({ cancelRefetch: false }) : Promise.resolve(),
         qc.invalidateQueries({ queryKey: ["workspace-tree", id] }),
         qc.invalidateQueries({ queryKey: ["file-preview", id] }),
+        qc.invalidateQueries({ queryKey: ["remote", id] }),
       ]);
     } finally {
       const remain = 1000 - (Date.now() - started);
@@ -259,76 +255,6 @@ export default function ProjectPage() {
       setCommitOpen(true);
     },
     onError: (e: Error) => setIdentityErr(e.message),
-  });
-
-  const revealProject = useMutation({
-    mutationFn: () => api(`/local-api/v1/projects/${id}/reveal`, { method: "POST", body: "{}" }),
-    onError: (e: Error) => setSettingsErr(e.message),
-  });
-
-  const relocateProject = useMutation({
-    mutationFn: async () => {
-      const picked = await api<{ path: string }>("/local-api/v1/dialog/folder", {
-        method: "POST",
-        body: "{}",
-      });
-      return api<{ ok: boolean; path: string }>(`/local-api/v1/projects/${id}/relocate`, {
-        method: "POST",
-        body: JSON.stringify({ path: picked.path }),
-      });
-    },
-    onSuccess: async () => {
-      setSettingsErr("");
-      setSettingsOpen(false);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["project", id] }),
-        qc.invalidateQueries({ queryKey: ["status", id] }),
-        qc.invalidateQueries({ queryKey: ["projects"] }),
-        qc.invalidateQueries({ queryKey: ["dashboard-activity"] }),
-      ]);
-    },
-    onError: (e: Error) => setSettingsErr(e.message),
-  });
-
-  const saveHideRules = useMutation({
-    mutationFn: () => {
-      const rules = hideRulesText
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
-      return api<{ ok: boolean; hideRules: string[] }>(`/local-api/v1/projects/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ hideRules: rules }),
-      });
-    },
-    onSuccess: async (data) => {
-      setSettingsErr("");
-      setHideRulesText((data.hideRules ?? []).join("\n"));
-      setHideRulesSaved(true);
-      window.setTimeout(() => setHideRulesSaved(false), 1500);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["project", id] }),
-        qc.invalidateQueries({ queryKey: ["workspace-tree", id] }),
-      ]);
-    },
-    onError: (e: Error) => setSettingsErr(e.message),
-  });
-
-  const removeProject = useMutation({
-    mutationFn: () => api(`/local-api/v1/projects/${id}`, { method: "DELETE" }),
-    onSuccess: async () => {
-      setSettingsOpen(false);
-      setRemoveConfirm(false);
-      await qc.invalidateQueries({ queryKey: ["projects"] });
-      await qc.invalidateQueries({ queryKey: ["dashboard-activity"] });
-      const remaining = (projectList.data?.projects || []).filter((p) => p.id !== id);
-      if (remaining[0]) {
-        nav(`/projects/${remaining[0].id}`, { replace: true });
-      } else {
-        nav("/", { replace: true });
-      }
-    },
-    onError: (e: Error) => setSettingsErr(e.message),
   });
 
   const files = useMemo(() => {
@@ -520,8 +446,6 @@ export default function ProjectPage() {
             <button
               type="button"
               onClick={() => {
-                setSettingsErr("");
-                setRemoveConfirm(false);
                 setSettingsOpen(true);
               }}
               className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
@@ -531,17 +455,31 @@ export default function ProjectPage() {
               <GearSix size={14} />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => void openBranchDrawer()}
-            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-[var(--radius-sm)] px-1 -ml-1 text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            title="管理分支"
-          >
-            <GitBranch size={12} className="shrink-0" />
-            <span className="truncate">
-              当前分支：{health?.detached ? "detached HEAD" : health?.branch || "…"}
-            </span>
-          </button>
+          <div className="mt-0.5 flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => void openBranchDrawer()}
+              className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-sm)] px-1 -ml-1 text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+              title="管理分支"
+            >
+              <GitBranch size={12} className="shrink-0" />
+              <span className="truncate">
+                当前分支：{health?.detached ? "detached HEAD" : health?.branch || "…"}
+              </span>
+            </button>
+            {remote.data?.connected && (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="shrink-0 rounded-full bg-[var(--color-canvas-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+                title="打开 GitHub 同步"
+              >
+                {remote.data.ahead > 0 || remote.data.behind > 0
+                  ? `↑${remote.data.ahead} ↓${remote.data.behind}`
+                  : "GitHub"}
+              </button>
+            )}
+          </div>
         </div>
         <div className="ml-auto flex rounded-[var(--radius-sm)] bg-[var(--color-canvas-subtle)] p-0.5">
           <ProjectTabButton active={tab === "files"} onClick={() => void setTab("files")}>
@@ -565,8 +503,6 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => {
-              setSettingsErr("");
-              setRemoveConfirm(false);
               setSettingsOpen(true);
             }}
             className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-3 py-1.5 text-xs font-medium"
@@ -811,7 +747,14 @@ export default function ProjectPage() {
                     >
                       <FolderSimple size={18} className="shrink-0" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate">{p.name}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="block truncate">{p.name}</span>
+                          {p.remoteLinked && ((p.ahead || 0) > 0 || (p.behind || 0) > 0) && (
+                            <span className="shrink-0 text-[10px] font-mono text-[var(--color-text-tertiary)]">
+                              ↑{p.ahead || 0} ↓{p.behind || 0}
+                            </span>
+                          )}
+                        </span>
                         <span className="block truncate text-xs font-mono text-[var(--color-text-tertiary)]">
                           {p.path}
                         </span>
@@ -873,109 +816,14 @@ export default function ProjectPage() {
       )}
 
       {settingsOpen && (
-        <Drawer
-          title="项目设置"
-          stackIndex={1}
-          width={420}
-          onClose={() => {
-            setSettingsOpen(false);
-            setRemoveConfirm(false);
-          }}
-        >
-          <div className="min-h-full flex flex-col gap-4">
-            <div>
-              <div className="text-sm font-medium mb-1">{project.data?.name || "项目"}</div>
-              <p className="text-xs font-mono text-[var(--color-text-tertiary)] break-all">
-                {project.data?.path || "…"}
-              </p>
-              {projectMissing && (
-                <p className="mt-2 text-sm text-[var(--color-error-fg)]">当前登记路径找不到目录。</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <button
-                type="button"
-                disabled={revealProject.isPending || projectMissing}
-                onClick={() => revealProject.mutate()}
-                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-              >
-                在文件管理器中显示
-              </button>
-              <button
-                type="button"
-                disabled={relocateProject.isPending}
-                onClick={() => relocateProject.mutate()}
-                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-              >
-                重新定位文件夹…
-              </button>
-            </div>
-
-            <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
-              <div className="text-sm font-medium mb-1">隐藏项</div>
-              <p className="text-xs text-[var(--color-text-secondary)] mb-2">
-                一行一条规则，匹配文件名的项不会出现在「文件」页目录树中。支持通配符，如{" "}
-                <span className="font-mono">*.DS*</span>。
-              </p>
-              <textarea
-                value={hideRulesText}
-                onChange={(e) => {
-                  setHideRulesText(e.target.value);
-                  setHideRulesSaved(false);
-                }}
-                onBlur={() => saveHideRules.mutate()}
-                rows={4}
-                spellCheck={false}
-                className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-canvas)] px-3 py-2 text-sm font-mono leading-relaxed resize-y min-h-[88px]"
-                placeholder={"*.DS*"}
-              />
-              <div className="mt-1.5 text-xs text-[var(--color-text-tertiary)]">
-                {saveHideRules.isPending
-                  ? "保存中…"
-                  : hideRulesSaved
-                    ? "已保存"
-                    : "失焦后自动保存"}
-              </div>
-            </div>
-
-            <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
-              <div className="text-sm font-medium mb-1">从 Forkly 移除</div>
-              <p className="text-xs text-[var(--color-text-secondary)] mb-3">
-                只移除本应用中的登记，不会删除磁盘上的文件夹或 `.git` 历史。
-              </p>
-              {!removeConfirm ? (
-                <button
-                  type="button"
-                  onClick={() => setRemoveConfirm(true)}
-                  className="rounded-[var(--radius-sm)] border border-[var(--color-error-fg)]/40 text-[var(--color-error-fg)] px-3 py-1.5 text-sm"
-                >
-                  移除项目
-                </button>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={removeProject.isPending}
-                    onClick={() => removeProject.mutate()}
-                    className="rounded-[var(--radius-sm)] bg-[var(--color-error-fg)] text-white px-3 py-1.5 text-sm disabled:opacity-50"
-                  >
-                    确认移除
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRemoveConfirm(false)}
-                    className="px-3 py-1.5 text-sm"
-                  >
-                    取消
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {settingsErr && <p className="text-sm text-[var(--color-error-fg)]">{settingsErr}</p>}
-          </div>
-        </Drawer>
+        <ProjectSettingsDrawer
+          projectID={id}
+          projectName={project.data?.name || "项目"}
+          projectPath={project.data?.path || ""}
+          hideRules={project.data?.hideRules}
+          projectMissing={projectMissing}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
     </div>
   );

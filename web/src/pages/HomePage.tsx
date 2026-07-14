@@ -89,10 +89,16 @@ export default function HomePage() {
     let blocked = 0;
     let missing = 0;
     let unreadable = 0;
+    let aheadTotal = 0;
+    let behindTotal = 0;
+    let remoteLinked = 0;
     const kindTotals: Record<string, number> = {};
 
     for (const p of projects) {
       pendingFiles += p.changeCount || 0;
+      if (p.remoteLinked) remoteLinked++;
+      aheadTotal += p.ahead || 0;
+      behindTotal += p.behind || 0;
       if (!p.exists) {
         missing++;
         continue;
@@ -124,6 +130,9 @@ export default function HomePage() {
       missing,
       unreadable,
       kindTotals,
+      aheadTotal,
+      behindTotal,
+      remoteLinked,
     };
   }, [projects]);
 
@@ -191,6 +200,26 @@ export default function HomePage() {
           hint={activityQ.isError ? "提交统计暂不可用" : undefined}
         />
         <StatCard label="待保存文件" value={overview.pendingFiles} loading={projectsQ.isLoading} />
+      </div>
+
+      <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 mb-4">
+        <StatCard
+          label="已关联 GitHub"
+          value={overview.remoteLinked}
+          loading={projectsQ.isLoading}
+        />
+        <StatCard
+          label="待推送提交"
+          value={overview.aheadTotal}
+          loading={projectsQ.isLoading}
+          hint={overview.aheadTotal > 0 ? "领先远端的本地提交总数" : undefined}
+        />
+        <StatCard
+          label="待拉取提交"
+          value={overview.behindTotal}
+          loading={projectsQ.isLoading}
+          hint={overview.behindTotal > 0 ? "落后远端的提交总数" : undefined}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">

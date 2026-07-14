@@ -71,6 +71,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"identity":           snap.Identity,
 		"identityConfigured": config.IdentityConfigured(snap.Identity),
 		"preferences":        snap.Preferences,
+		"githubAccount":      snap.GitHubAccount,
+		"githubOAuthConfigured": s.deps.GitHub != nil && s.deps.GitHub.OAuthConfigured(),
 		"git": map[string]any{
 			"version": rt.Version,
 			"bundled": rt.Bundled,
@@ -428,6 +430,8 @@ func (s *Server) handleProjectSub(w http.ResponseWriter, r *http.Request) {
 		})(w, r)
 	case "branches":
 		s.handleBranches(w, r, id, p, parts)
+	case "remote":
+		s.handleProjectRemote(w, r, id, p, parts)
 	default:
 		writeErr(w, http.StatusNotFound, "not found")
 	}
@@ -764,6 +768,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"git":         map[string]any{"version": rt.Version, "bundled": rt.Bundled, "path": rt.GitPath},
 			"configPath":  s.deps.Store.Path(),
 			"logDir":      s.deps.Log.Dir(),
+			"githubAccount": snap.GitHubAccount,
+			"githubOAuthConfigured": s.deps.GitHub != nil && s.deps.GitHub.OAuthConfigured(),
 		})
 	case http.MethodPut:
 		s.authWrite(func(w http.ResponseWriter, r *http.Request) {

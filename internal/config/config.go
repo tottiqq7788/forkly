@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const Version = 1
+// Version is the current config schema.
+// v1: projects + identity + preferences
+// v2: + GitHub account metadata + per-project remote link (no secrets)
+const Version = 2
 
 type ProjectEntry struct {
 	ID       string    `json:"id"`
@@ -24,6 +27,31 @@ type ProjectEntry struct {
 	// nil means “never configured” and ResolvedHideRules returns the default;
 	// an empty slice means the user cleared all rules.
 	HideRules []string `json:"hideRules"`
+	// Remote links this project to a managed GitHub remote (no tokens).
+	// The actual remote URL lives in .git/config; this only records which remote
+	// Forkly manages and the last successful metadata.
+	Remote *RemoteLink `json:"remote,omitempty"`
+}
+
+// RemoteLink is non-secret metadata about a project's managed GitHub remote.
+type RemoteLink struct {
+	Provider   string     `json:"provider"`             // "github"
+	RemoteName string     `json:"remoteName"`           // usually "origin"
+	Owner      string     `json:"owner,omitempty"`
+	Repo       string     `json:"repo,omitempty"`
+	AccountID  string     `json:"accountId,omitempty"`  // credentials store key
+	LinkedAt   time.Time  `json:"linkedAt,omitempty"`
+	LastFetchAt *time.Time `json:"lastFetchAt,omitempty"`
+}
+
+// GitHubAccountMeta is non-secret account display info. Tokens live in Keychain.
+type GitHubAccountMeta struct {
+	AccountID string    `json:"accountId"`
+	Login     string    `json:"login"`
+	Name      string    `json:"name,omitempty"`
+	AvatarURL string    `json:"avatarUrl,omitempty"`
+	AuthKind  string    `json:"authKind"` // "oauth" | "pat"
+	LinkedAt  time.Time `json:"linkedAt"`
 }
 
 // DefaultHideRule hides common macOS Finder metadata files in the files tree.
@@ -68,10 +96,11 @@ type Preferences struct {
 }
 
 type File struct {
-	Version     int            `json:"version"`
-	Projects    []ProjectEntry `json:"projects"`
-	Identity    GitIdentity    `json:"identity"`
-	Preferences Preferences    `json:"preferences"`
+	Version       int                 `json:"version"`
+	Projects      []ProjectEntry      `json:"projects"`
+	Identity      GitIdentity         `json:"identity"`
+	Preferences   Preferences         `json:"preferences"`
+	GitHubAccount *GitHubAccountMeta  `json:"githubAccount,omitempty"`
 }
 
 type Store struct {
@@ -151,13 +180,36 @@ func Open(dataDir string) (*Store, error) {
 		}
 		return s, nil
 	}
-	if s.data.Version == 0 {
-		s.data.Version = Version
-	}
+	migrated := migrateFile(&s.data)
 	if s.data.Preferences.Theme == "" {
 		s.data.Preferences.Theme = "system"
 	}
+	if migrated {
+		if err := s.saveLocked(); err != nil {
+			return nil, fmt.Errorf("config migrate save failed: %w", err)
+		}
+	}
 	return s, nil
+}
+
+// migrateFile upgrades older schemas in place. Returns true if a save is needed.
+func migrateFile(f *File) bool {
+	changed := false
+	if f.Version == 0 {
+		f.Version = 1
+		changed = true
+	}
+	if f.Version < 2 {
+		// v1 → v2: remote links and GitHub account are optional nils.
+		f.Version = 2
+		changed = true
+	}
+	if f.Version > Version {
+		// Future schema: keep what we can; still mark current.
+		f.Version = Version
+		changed = true
+	}
+	return changed
 }
 
 func defaultFile() File {
@@ -178,8 +230,30 @@ func defaultFile() File {
 func (s *Store) Snapshot() File {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	cp := s.data
-	cp.Projects = append([]ProjectEntry(nil), s.data.Projects...)
+	return cloneFile(s.data)
+}
+
+func cloneFile(src File) File {
+	cp := src
+	cp.Projects = make([]ProjectEntry, len(src.Projects))
+	for i, p := range src.Projects {
+		cp.Projects[i] = p
+		if p.HideRules != nil {
+			cp.Projects[i].HideRules = append([]string(nil), p.HideRules...)
+		}
+		if p.Remote != nil {
+			r := *p.Remote
+			if p.Remote.LastFetchAt != nil {
+				t := *p.Remote.LastFetchAt
+				r.LastFetchAt = &t
+			}
+			cp.Projects[i].Remote = &r
+		}
+	}
+	if src.GitHubAccount != nil {
+		a := *src.GitHubAccount
+		cp.GitHubAccount = &a
+	}
 	return cp
 }
 

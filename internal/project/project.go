@@ -34,6 +34,10 @@ type ProjectView struct {
 	Summary     string         `json:"summary"`
 	Blockers    []string       `json:"blockers,omitempty"`
 	KindCounts  map[string]int `json:"kindCounts,omitempty"`
+	Ahead       int            `json:"ahead,omitempty"`
+	Behind      int            `json:"behind,omitempty"`
+	RemoteLinked bool          `json:"remoteLinked,omitempty"`
+	RemoteLabel string         `json:"remoteLabel,omitempty"`
 }
 
 func (s *Service) List(ctx context.Context) ([]ProjectView, error) {
@@ -64,6 +68,27 @@ func (s *Service) List(ctx context.Context) ([]ProjectView, error) {
 				v.Summary = "无修改"
 			} else {
 				v.Summary = fmt.Sprintf("%d 个修改", len(st.Files))
+			}
+		}
+		if p.Remote != nil {
+			v.RemoteLinked = true
+			if p.Remote.Owner != "" && p.Remote.Repo != "" {
+				v.RemoteLabel = p.Remote.Owner + "/" + p.Remote.Repo
+			}
+			remoteName := p.Remote.RemoteName
+			if remoteName == "" {
+				remoteName = "origin"
+			}
+			if sync, err := s.git.RemoteSyncStatus(ctx, p.Path, remoteName); err == nil {
+				v.Ahead = sync.Ahead
+				v.Behind = sync.Behind
+				if sync.Ahead > 0 || sync.Behind > 0 {
+					if v.Summary == "无修改" || v.Summary == "" {
+						v.Summary = fmt.Sprintf("↑%d ↓%d", sync.Ahead, sync.Behind)
+					} else {
+						v.Summary = fmt.Sprintf("%s · ↑%d ↓%d", v.Summary, sync.Ahead, sync.Behind)
+					}
+				}
 			}
 		}
 		out = append(out, v)

@@ -13,7 +13,9 @@ import (
 	"github.com/forkly-app/forkly/internal/config"
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/gitexec"
+	gh "github.com/forkly-app/forkly/internal/github"
 	"github.com/forkly-app/forkly/internal/localfile"
+	"github.com/forkly-app/forkly/internal/operation"
 	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
@@ -26,6 +28,9 @@ type Deps struct {
 	Store      *config.Store
 	Git        *gitexec.Executor
 	Projects   *project.Service
+	Remotes    *project.RemoteService
+	GitHub     *gh.Client
+	Ops        *operation.Manager
 	Sessions   *session.Manager
 	LocalFiles *localfile.Service
 	Picker     platform.FolderPicker
@@ -86,6 +91,14 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	mux.HandleFunc("/local-api/v1/projects", s.auth(s.handleProjects))
 	mux.HandleFunc("/local-api/v1/projects/", s.auth(s.handleProjectSub))
 	mux.HandleFunc("/local-api/v1/settings", s.auth(s.handleSettings))
+	mux.HandleFunc("/local-api/v1/settings/github", s.auth(s.handleGitHubSettings))
+	mux.HandleFunc("/local-api/v1/github/device/start", s.authWrite(s.handleGitHubDeviceStart))
+	mux.HandleFunc("/local-api/v1/github/device/status", s.auth(s.handleGitHubDeviceStatus))
+	mux.HandleFunc("/local-api/v1/github/device/cancel", s.authWrite(s.handleGitHubDeviceCancel))
+	mux.HandleFunc("/local-api/v1/github/pat", s.authWrite(s.handleGitHubPAT))
+	mux.HandleFunc("/local-api/v1/github/repos", s.auth(s.handleGitHubRepos))
+	mux.HandleFunc("/local-api/v1/projects/clone", s.authWrite(s.handleProjectClone))
+	mux.HandleFunc("/local-api/v1/operations/", s.auth(s.handleOperations))
 	mux.HandleFunc("/local-api/v1/dialog/folder", s.authWrite(s.handleFolderDialog))
 	mux.HandleFunc("/local-api/v1/local-files/", s.auth(s.handleLocalFiles))
 	mux.Handle("/", s.static())
@@ -234,6 +247,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func writeErrCode(w http.ResponseWriter, status int, msg, code string, details any) {
+	body := map[string]any{"error": msg}
+	if code != "" {
+		body["code"] = code
+	}
+	if details != nil {
+		body["details"] = details
+	}
+	writeJSON(w, status, body)
 }
 
 func decodeJSON(r *http.Request, v any) error {

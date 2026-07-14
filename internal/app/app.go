@@ -12,17 +12,20 @@ import (
 
 	"fyne.io/systray"
 	"github.com/forkly-app/forkly/internal/config"
+	"github.com/forkly-app/forkly/internal/credentials"
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/gitexec"
+	gh "github.com/forkly-app/forkly/internal/github"
 	"github.com/forkly-app/forkly/internal/localapi"
 	"github.com/forkly-app/forkly/internal/localfile"
+	"github.com/forkly-app/forkly/internal/operation"
 	"github.com/forkly-app/forkly/internal/platform"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.46"
+var Version = "0.1.47"
 
 // LaunchPaths holds Markdown paths collected before the app is fully ready.
 type LaunchOptions struct {
@@ -77,6 +80,20 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 	projects := project.NewService(store, git)
 	sessions := session.NewManager(12 * time.Hour)
 	localFiles := localfile.NewService(git)
+	creds := credentials.NewKeychainStore()
+	githubClient := gh.NewClient(creds)
+	ops := operation.NewManager()
+	remotes := &project.RemoteService{
+		Projects: projects,
+		Store:    store,
+		Git:      git,
+		GitHub:   githubClient,
+	}
+	bg := NewBackgroundFetcher(log, store, remotes)
+	bg.SetProjects(projects)
+	bg.Start()
+	defer bg.Stop()
+	defer ops.CancelAll()
 
 	wm := watcher.New(func(projectID string) {
 		log.Info("project changed", "id", projectID)
@@ -85,6 +102,7 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
+		Remotes: remotes, GitHub: githubClient, Ops: ops,
 		Sessions: sessions, LocalFiles: localFiles,
 		Picker: picker, Reveal: reveal, Watcher: wm, Version: Version,
 	})
@@ -180,16 +198,12 @@ func Run(ctx context.Context, log *diagnostics.Logger, opts LaunchOptions) error
 		systray.SetTooltip("Forkly " + Version)
 		mOpen := systray.AddMenuItem("打开控制台", "在浏览器中打开本地控制台")
 		list, _ := projects.List(context.Background())
-		statusLabel := "暂无项目"
-		if n := len(list); n > 0 {
-			changes := 0
-			for _, p := range list {
-				changes += p.ChangeCount
-			}
-			statusLabel = fmt.Sprintf("%d 个项目，%d 个文件待保存", n, changes)
-		}
+		statusLabel := formatTrayStatusLabel(list)
 		mStatus := systray.AddMenuItem(statusLabel, "")
 		mStatus.Disable()
+		bg.SetTrayUpdater(func(label string) {
+			mStatus.SetTitle(label)
+		})
 		systray.AddSeparator()
 		mPause := systray.AddMenuItemCheckbox("暂停后台检查", "", !store.Snapshot().Preferences.BackgroundChecks)
 		mLogs := systray.AddMenuItem("查看日志", "")

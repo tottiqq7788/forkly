@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"github.com/forkly-app/forkly/internal/config"
+	"github.com/forkly-app/forkly/internal/credentials"
 	"github.com/forkly-app/forkly/internal/diagnostics"
 	"github.com/forkly-app/forkly/internal/gitexec"
+	gh "github.com/forkly-app/forkly/internal/github"
 	"github.com/forkly-app/forkly/internal/localapi"
 	"github.com/forkly-app/forkly/internal/localfile"
+	"github.com/forkly-app/forkly/internal/operation"
 	"github.com/forkly-app/forkly/internal/project"
 	"github.com/forkly-app/forkly/internal/session"
 	"github.com/forkly-app/forkly/internal/watcher"
@@ -75,12 +78,23 @@ func StartServerOnly(ctx context.Context, log *diagnostics.Logger, opts ServerOn
 	projects := project.NewService(store, git)
 	sessions := session.NewManager(12 * time.Hour)
 	localFiles := localfile.NewService(git)
+	// Server-only / tests use in-memory credentials to stay hermetic.
+	credStore := credentials.Store(credentials.NewMemoryStore())
+	githubClient := gh.NewClient(credStore)
+	ops := operation.NewManager()
+	remotes := &project.RemoteService{
+		Projects: projects,
+		Store:    store,
+		Git:      git,
+		GitHub:   githubClient,
+	}
 	wm := watcher.New(nil)
 	for _, p := range store.Snapshot().Projects {
 		_ = wm.Watch(p.ID, p.Path)
 	}
 	api := localapi.New(localapi.Deps{
 		Log: log, Store: store, Git: git, Projects: projects,
+		Remotes: remotes, GitHub: githubClient, Ops: ops,
 		Sessions: sessions, LocalFiles: localFiles,
 		Watcher: wm, Version: Version, DevMode: opts.DevMode,
 	})
@@ -96,6 +110,7 @@ func StartServerOnly(ctx context.Context, log *diagnostics.Logger, opts ServerOn
 		LocalFiles: localFiles,
 		api:        api,
 		Shutdown: func(c context.Context) error {
+			ops.CancelAll()
 			err := baseShutdown(c)
 			wm.Close()
 			return err

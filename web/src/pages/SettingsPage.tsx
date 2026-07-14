@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { GitHubAccountPanel } from "../components/github/GitHubAccountPanel";
 
 type Settings = {
   identity: { name: string; email: string };
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [theme, setTheme] = useState("system");
+  const [backgroundChecks, setBackgroundChecks] = useState(true);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
@@ -26,6 +28,7 @@ export default function SettingsPage() {
     setName(data.identity.name);
     setEmail(data.identity.email);
     setTheme(data.preferences.theme);
+    setBackgroundChecks(data.preferences.backgroundChecks);
     applyTheme(data.preferences.theme);
   }, [data]);
 
@@ -43,7 +46,7 @@ export default function SettingsPage() {
         method: "PUT",
         body: JSON.stringify({
           identity: { name: trimmedName, email: trimmedEmail },
-          preferences: { theme, backgroundChecks: data?.preferences.backgroundChecks ?? true },
+          preferences: { theme, backgroundChecks },
         }),
       });
     },
@@ -81,6 +84,11 @@ export default function SettingsPage() {
       </section>
 
       <section className="space-y-3">
+        <h2 className="font-medium">GitHub</h2>
+        <GitHubAccountPanel />
+      </section>
+
+      <section className="space-y-3">
         <h2 className="font-medium">外观</h2>
         <div className="flex gap-3 text-sm">
           {(["system", "light", "dark"] as const).map((t) => (
@@ -90,6 +98,18 @@ export default function SettingsPage() {
             </label>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="font-medium">后台检查</h2>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={backgroundChecks}
+            onChange={(e) => setBackgroundChecks(e.target.checked)}
+          />
+          自动轻量获取 GitHub 远端状态（不会自动拉取或推送）
+        </label>
       </section>
 
       <section className="space-y-2">
@@ -108,7 +128,7 @@ export default function SettingsPage() {
 
       <section>
         <h2 className="font-medium mb-1">关于</h2>
-        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.46 · 本地可视化 Git</p>
+        <p className="text-sm text-[var(--color-text-secondary)]">Forkly 0.1.47 · 本地可视化 Git</p>
       </section>
 
       <div className="flex items-center gap-3">
