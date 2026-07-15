@@ -109,3 +109,15 @@ func TestEnvelopeJSONSuccess(t *testing.T) {
 		t.Fatalf("unexpected: %s", out.String())
 	}
 }
+
+func TestIsForklyctlExecutableBase(t *testing.T) {
+	if !isForklyctlExecutableBase("forklyctl") {
+		t.Fatal("plain name")
+	}
+	if !isForklyctlExecutableBase("forklyctl.exe") {
+		t.Fatal("windows name")
+	}
+	if isForklyctlExecutableBase("forkly") || isForklyctlExecutableBase("forklyctl.bak") {
+		t.Fatal("unexpected match")
+	}
+}

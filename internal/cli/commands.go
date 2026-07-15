@@ -6,8 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/forkly-app/forkly/internal/agentauth"
@@ -138,35 +141,75 @@ func cmdDoctor(c *Client) int {
 		"dataDir":    c.DataDir,
 		"install":    FindInstallHint(),
 		"paired":     c.Token != "",
+		"fixes":      []string{},
 	}
+	fixes := []string{}
 	info, err := c.Discover()
 	if err != nil {
 		report["runtime"] = map[string]any{"ok": false, "error": err.Error()}
+		fixes = append(fixes, "启动 Forkly 桌面应用，或检查 dataDir/runtime/api.json")
 	} else {
 		report["runtime"] = info
 		c.BaseURL = info.BaseURL
 		if h, err := c.Health(); err != nil {
 			report["health"] = map[string]any{"ok": false, "error": err.Error()}
+			fixes = append(fixes, "Local API 未响应：确认 Forkly 仍在运行且未改监听地址")
+		} else if err := c.attestHealth(info, h); err != nil {
+			report["health"] = h
+			report["attest"] = map[string]any{"ok": false, "error": err.Error()}
+			fixes = append(fixes, "runtime 与 /health 身份不一致：重启 Forkly；若已配对请重新 forklyctl pair")
 		} else {
 			report["health"] = h
+			report["attest"] = map[string]any{"ok": true}
+			ver, _ := h["apiVersion"].(float64)
+			if int(ver) > runtimeinfo.APIVersion {
+				fixes = append(fixes, "请升级 forklyctl 以匹配更新的 API 版本")
+			}
 		}
 	}
+	if c.Token == "" {
+		fixes = append(fixes, "运行 forklyctl pair，并在设置 →「命令行与 AI 工具」批准配对码")
+	}
+	st := cliinstall.Status()
+	report["cliInstall"] = st
+	if !pathHasForklyctl() {
+		fixes = append(fixes, "将 forklyctl 加入 PATH：forklyctl tools install-cli --scope user，或使用 App 内绝对路径")
+	}
+	report["fixes"] = fixes
+	report["ok"] = len(fixes) == 0
 	return c.PrintResult(report)
+}
+
+func pathHasForklyctl() bool {
+	if _, err := exec.LookPath("forklyctl"); err == nil {
+		return true
+	}
+	// Absolute-path invocations (App bundle / explicit binary) are not on PATH.
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return isForklyctlExecutableBase(filepath.Base(exe))
+}
+
+func isForklyctlExecutableBase(base string) bool {
+	return strings.TrimSuffix(base, ".exe") == "forklyctl"
 }
 
 func cmdCapabilities(c *Client) int {
 	caps := []map[string]any{
-		{"command": "projects list", "scope": agentauth.ScopeRead, "headless": true},
-		{"command": "project add", "scope": agentauth.ScopeProjectAdmin, "headless": true},
-		{"command": "files write", "scope": agentauth.ScopeFileWrite, "headless": true},
-		{"command": "files upload-asset", "scope": agentauth.ScopeFileWrite, "headless": true},
-		{"command": "file open|read|write", "scope": agentauth.ScopeFileWrite, "headless": true},
-		{"command": "commit", "scope": agentauth.ScopeCommit, "headless": true},
-		{"command": "branches *", "scope": agentauth.ScopeBranchWrite, "headless": true},
-		{"command": "remote *", "scope": agentauth.ScopeRemoteWrite, "headless": true},
-		{"command": "github *", "scope": agentauth.ScopeAccountAdmin, "headless": true},
-		{"command": "tools install-cli", "scope": "", "headless": true},
-		{"command": "ui *", "scope": agentauth.ScopeUIControl, "headless": false},
+		{"command": "projects list", "scope": agentauth.ScopeRead, "headless": true, "args": map[string]any{}},
+		{"command": "project add", "scope": agentauth.ScopeProjectAdmin, "headless": true, "args": map[string]any{"--path": "string", "--name": "string?"}},
+		{"command": "project create", "scope": agentauth.ScopeProjectAdmin, "headless": true, "args": map[string]any{"--path": "string", "--name": "string?"}},
+		{"command": "files write", "scope": agentauth.ScopeFileWrite, "headless": true, "args": map[string]any{"--path": "string", "--content": "string?", "--revision": "string?"}},
+		{"command": "files upload-asset", "scope": agentauth.ScopeFileWrite, "headless": true, "args": map[string]any{"--markdown": "string", "--file": "string"}},
+		{"command": "file open|read|write", "scope": agentauth.ScopeFileWrite, "headless": true, "args": map[string]any{"--path": "string?", "--id": "string?", "--content": "string?"}},
+		{"command": "commit", "scope": agentauth.ScopeCommit, "headless": true, "args": map[string]any{"--paths": "csv", "--message": "string"}},
+		{"command": "branches *", "scope": agentauth.ScopeBranchWrite, "headless": true, "args": map[string]any{"name": "string"}},
+		{"command": "remote *", "scope": agentauth.ScopeRemoteWrite, "headless": true, "args": map[string]any{"--url": "string?", "--no-wait": "bool?"}},
+		{"command": "github *", "scope": agentauth.ScopeAccountAdmin, "headless": true, "args": map[string]any{}},
+		{"command": "tools install-cli", "scope": "", "headless": true, "args": map[string]any{"--scope": "user|system"}},
+		{"command": "ui *", "scope": agentauth.ScopeUIControl, "headless": false, "args": map[string]any{"--path": "string?"}},
 	}
 	return c.PrintResult(map[string]any{
 		"apiVersion": runtimeinfo.APIVersion,
@@ -964,7 +1007,17 @@ func cmdRemote(c *Client, args []string, opts Options) int {
 
 func waitOp(c *Client, id string) int {
 	deadline := time.Now().Add(10 * time.Minute)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	for time.Now().Before(deadline) {
+		select {
+		case <-sigCh:
+			var out any
+			_ = c.doJSON(http.MethodDelete, "/local-api/v1/operations/"+id, map[string]any{}, &out, true)
+			return c.PrintErr(fmt.Errorf("已请求取消操作 %s", id))
+		default:
+		}
 		var op map[string]any
 		if err := c.doJSON(http.MethodGet, "/local-api/v1/operations/"+id, nil, &op, true); err != nil {
 			return c.PrintErr(err)

@@ -30,6 +30,28 @@ function contentPath(url: string): string {
   return new URL(url, "http://localhost").searchParams.get("path") || "";
 }
 
+function treePath(url: string): string {
+  return new URL(url, "http://localhost").searchParams.get("path") || "";
+}
+
+function treeListing(path: string, entries: Array<{ name: string; path: string; kind: string }>) {
+  return {
+    path,
+    source: "worktree",
+    entries,
+    offset: 0,
+    limit: 200,
+    hasMore: false,
+  };
+}
+
+function requestedTreePaths(): string[] {
+  return apiMock.mock.calls
+    .map((call) => String(call[0]))
+    .filter((url) => url.includes("/tree?"))
+    .map((url) => treePath(url));
+}
+
 describe("ProjectFilesPanel selection", () => {
   beforeEach(() => {
     apiMock.mockReset();
@@ -517,5 +539,290 @@ describe("ProjectFilesPanel selection", () => {
     expect(screen.getByRole("menuitem", { name: "复制相对路径" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "重命名" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "复制绝对路径" })).toBeNull();
+  });
+});
+
+describe("ProjectFilesPanel default expand", () => {
+  beforeEach(() => {
+    apiMock.mockReset();
+    fetchFileContentMock.mockReset();
+    createProjectEntryMock.mockReset();
+    renameProjectEntryMock.mockReset();
+    deleteProjectEntryMock.mockReset();
+    revealProjectPathMock.mockReset();
+    clipboardWriteMock.mockReset();
+    fetchFileContentMock.mockImplementation(async (_projectID: string, source: string, path: string) => ({
+      path,
+      source,
+      kind: "text",
+      content: path,
+      size: path.length,
+      editable: true,
+      revision: "r1",
+    }));
+  });
+
+  it("expands only the first file's ancestor dirs and does not load sibling trees", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        const path = treePath(url);
+        if (path === "") {
+          return treeListing("", [
+            { name: "docs", path: "docs", kind: "dir" },
+            { name: "other", path: "other", kind: "dir" },
+            { name: "readme.txt", path: "readme.txt", kind: "file" },
+          ]);
+        }
+        if (path === "docs") {
+          return treeListing("docs", [{ name: "nested", path: "docs/nested", kind: "dir" }]);
+        }
+        if (path === "docs/nested") {
+          return treeListing("docs/nested", [
+            { name: "note.md", path: "docs/nested/note.md", kind: "file" },
+          ]);
+        }
+        throw new Error(`unexpected tree path: ${path}`);
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return { path, source: "worktree", kind: "text", content: path, size: path.length };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const onPathChange = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" onPathChange={onPathChange} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTitle("docs/nested/note.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTitle("docs/nested/note.md").parentElement).toHaveClass(
+        "bg-[var(--color-surface-active)]",
+      );
+      expect(onPathChange).toHaveBeenCalledWith("docs/nested/note.md");
+    });
+    expect(screen.queryByTitle("other/skip.txt")).toBeNull();
+    expect(screen.queryByTitle("readme.txt")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const paths = new Set(requestedTreePaths());
+      expect(paths.has("")).toBe(true);
+      expect(paths.has("docs")).toBe(true);
+      expect(paths.has("docs/nested")).toBe(true);
+      expect(paths.has("other")).toBe(false);
+    });
+  });
+
+  it("does not treat a failed directory load as empty when probing the first file", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        const path = treePath(url);
+        if (path === "") {
+          return treeListing("", [
+            { name: "broken", path: "broken", kind: "dir" },
+            { name: "docs", path: "docs", kind: "dir" },
+            { name: "readme.txt", path: "readme.txt", kind: "file" },
+          ]);
+        }
+        if (path === "broken") {
+          throw new Error("permission denied");
+        }
+        if (path === "docs") {
+          return treeListing("docs", [{ name: "a.txt", path: "docs/a.txt", kind: "file" }]);
+        }
+        throw new Error(`unexpected tree path: ${path}`);
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return { path, source: "worktree", kind: "text", content: path, size: path.length };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const onPathChange = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" onPathChange={onPathChange} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("permission denied")).toBeInTheDocument();
+    expect(screen.queryByTitle("docs/a.txt")).toBeNull();
+    expect(screen.queryByTitle("readme.txt")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(onPathChange).not.toHaveBeenCalled();
+    });
+  });
+
+  it("collapses empty dirs probed while locating the first file", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        const path = treePath(url);
+        if (path === "") {
+          return treeListing("", [
+            { name: "empty", path: "empty", kind: "dir" },
+            { name: "docs", path: "docs", kind: "dir" },
+          ]);
+        }
+        if (path === "empty") {
+          return treeListing("empty", []);
+        }
+        if (path === "docs") {
+          return treeListing("docs", [{ name: "a.txt", path: "docs/a.txt", kind: "file" }]);
+        }
+        throw new Error(`unexpected tree path: ${path}`);
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return { path, source: "worktree", kind: "text", content: path, size: path.length };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTitle("docs/a.txt")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("目录为空")).toBeNull();
+      expect(screen.queryByTitle("docs/a.txt")).toBeInTheDocument();
+    });
+    // empty was probed (so its tree was fetched) but should not stay open
+    expect(requestedTreePaths()).toContain("empty");
+    expect(screen.queryByTitle("docs/a.txt")).toBeInTheDocument();
+    const emptyRow = screen.getByTitle("empty");
+    const emptyCaret = emptyRow.querySelector("svg");
+    expect(emptyCaret?.classList.contains("rotate-90")).toBe(false);
+    const docsRow = screen.getByTitle("docs");
+    const docsCaret = docsRow.querySelector("svg");
+    expect(docsCaret?.classList.contains("rotate-90")).toBe(true);
+  });
+
+  it("re-expands activePath ancestors after source switch clears loaded dirs", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      const source = url.includes("source=head") ? "head" : "worktree";
+      if (url.includes("/tree?")) {
+        const path = treePath(url);
+        if (path === "") {
+          return {
+            ...treeListing("", [
+              { name: "docs", path: "docs", kind: "dir" },
+              { name: "other", path: "other", kind: "dir" },
+            ]),
+            source,
+          };
+        }
+        if (path === "docs") {
+          return {
+            ...treeListing("docs", [{ name: "note.md", path: "docs/note.md", kind: "file" }]),
+            source,
+          };
+        }
+        if (path === "other") {
+          return {
+            ...treeListing("other", [{ name: "skip.txt", path: "other/skip.txt", kind: "file" }]),
+            source,
+          };
+        }
+        throw new Error(`unexpected tree path: ${path}`);
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return { path, source, kind: "text", content: path, size: path.length };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTitle("docs/note.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTitle("docs/note.md").parentElement).toHaveClass(
+        "bg-[var(--color-surface-active)]",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "版本" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "版本" })).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(await screen.findByTitle("docs/note.md")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "目录" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "目录" })).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(await screen.findByTitle("docs/note.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTitle("docs/note.md").parentElement).toHaveClass(
+        "bg-[var(--color-surface-active)]",
+      );
+    });
+    expect(screen.queryByTitle("other/skip.txt")).toBeNull();
+  });
+
+  it("expands only preferredPath ancestors without probing the first-file branch", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url.includes("/tree?")) {
+        const path = treePath(url);
+        if (path === "") {
+          return treeListing("", [
+            { name: "first", path: "first", kind: "dir" },
+            { name: "second", path: "second", kind: "dir" },
+          ]);
+        }
+        if (path === "first") {
+          return treeListing("first", [{ name: "skip.txt", path: "first/skip.txt", kind: "file" }]);
+        }
+        if (path === "second") {
+          return treeListing("second", [
+            { name: "target.md", path: "second/target.md", kind: "file" },
+          ]);
+        }
+        throw new Error(`unexpected tree path: ${path}`);
+      }
+      if (url.includes("/content?")) {
+        const path = contentPath(url);
+        return { path, source: "worktree", kind: "text", content: path, size: path.length };
+      }
+      throw new Error(`unexpected API: ${url}`);
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectFilesPanel projectID="p1" projectName="demo" preferredPath="second/target.md" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTitle("second/target.md")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTitle("second/target.md").parentElement).toHaveClass(
+        "bg-[var(--color-surface-active)]",
+      );
+    });
+    expect(screen.queryByTitle("first/skip.txt")).toBeNull();
+
+    await waitFor(() => {
+      const paths = new Set(requestedTreePaths());
+      expect(paths.has("")).toBe(true);
+      expect(paths.has("second")).toBe(true);
+      expect(paths.has("first")).toBe(false);
+    });
   });
 });

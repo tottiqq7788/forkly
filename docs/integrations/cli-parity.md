@@ -109,8 +109,10 @@
 | 操作 | Local API | Web | CLI | 状态 |
 |------|-----------|-----|-----|------|
 | 发起配对 | `POST /agent/pair/start` | — | `pair [--preset P] [--name N]` | `cli_supported` |
+| 查询配对状态 | `GET /agent/pair/status` | — | `pair`（轮询内建） | `cli_supported` |
 | 领取令牌 | `POST /agent/pair/claim` | — | `pair`（轮询内建） | `cli_supported` |
-| 批准 / 拒绝配对 | `POST /agent/pair/approve\|deny` | 设置 → 命令行与 AI 工具 | — | `gui_adapted` |
+| 批准配对 | `POST /agent/pair/approve` | 设置 → 命令行与 AI 工具 | — | `gui_adapted` |
+| 拒绝配对 | `POST /agent/pair/deny` | 设置 → 命令行与 AI 工具 | — | `gui_adapted` |
 | 查看待批准列表 | `GET /agent/pair/pending` | 设置页 | — | `gui_adapted` |
 | 管理已授权客户端 | `GET/DELETE /agent/clients` | 设置页 | — | `gui_adapted` |
 | 本地配对状态 / 撤销 | — | — | `auth status` / `auth revoke --yes` | `cli_supported` |

@@ -81,6 +81,7 @@ export function ProjectFilesPanel({
     head: { path: "" },
   });
   const [loadedDirs, setLoadedDirs] = useState<Record<string, TreeEntry[]>>({});
+  const [failedDirs, setFailedDirs] = useState<Set<string>>(() => new Set());
   const [menu, setMenu] = useState<ProjectFilesContextMenuState | null>(null);
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
@@ -109,12 +110,13 @@ export function ProjectFilesPanel({
     setSelection({ worktree: { path: "" }, head: { path: "" } });
     setSource("worktree");
     setLoadedDirs({});
+    setFailedDirs(new Set());
     pendingPathChange.current = "";
   }, [projectID]);
 
   useEffect(() => {
     if (!branchKey) return;
-    // First time we learn the branch after mount — keep cascade expand, don't wipe.
+    // First time we learn the branch after mount — keep first-file expand path, don't wipe.
     if (!knownBranchKey.current) {
       knownBranchKey.current = branchKey;
       return;
@@ -124,11 +126,13 @@ export function ProjectFilesPanel({
     setExpandedBySource(emptyExpandedBySource());
     setSelection({ worktree: { path: "" }, head: { path: "" } });
     setLoadedDirs({});
+    setFailedDirs(new Set());
     pendingPathChange.current = "";
   }, [branchKey]);
 
   useEffect(() => {
     setLoadedDirs({});
+    setFailedDirs(new Set());
   }, [source]);
 
   const expandDirs = useCallback(
@@ -151,7 +155,28 @@ export function ProjectFilesPanel({
     [source],
   );
 
+  /** Replace expanded dirs for the current source (always keep root ""). */
+  const revealExpandedDirs = useCallback(
+    (paths: string[]) => {
+      setExpandedBySource((prev) => {
+        const next = new Set<string>(["", ...paths]);
+        const current = prev[source];
+        if (current.size === next.size && [...next].every((path) => current.has(path))) {
+          return prev;
+        }
+        return { ...prev, [source]: next };
+      });
+    },
+    [source],
+  );
+
   const reportEntries = useCallback((dirPath: string, entries: TreeEntry[]) => {
+    setFailedDirs((prev) => {
+      if (!prev.has(dirPath)) return prev;
+      const next = new Set(prev);
+      next.delete(dirPath);
+      return next;
+    });
     setLoadedDirs((prev) => {
       const old = prev[dirPath];
       if (
@@ -162,6 +187,21 @@ export function ProjectFilesPanel({
         return prev;
       }
       return { ...prev, [dirPath]: entries };
+    });
+  }, []);
+
+  const reportDirFailed = useCallback((dirPath: string) => {
+    setFailedDirs((prev) => {
+      if (prev.has(dirPath)) return prev;
+      const next = new Set(prev);
+      next.add(dirPath);
+      return next;
+    });
+    setLoadedDirs((prev) => {
+      if (!(dirPath in prev)) return prev;
+      const next = { ...prev };
+      delete next[dirPath];
+      return next;
     });
   }, []);
 
@@ -180,10 +220,6 @@ export function ProjectFilesPanel({
     [rootQuery.data],
   );
   const emptyHead = rootQuery.data?.pages[0]?.emptyHead === true;
-
-  useEffect(() => {
-    expandDirs(dirPaths(rootEntries));
-  }, [expandDirs, rootEntries, projectID, branchKey]);
 
   useEffect(() => {
     if (rootQuery.isLoading && !rootQuery.data) return;
@@ -215,8 +251,12 @@ export function ProjectFilesPanel({
 
     if (preferredPath) {
       const preferredKnown = pathKnownInTree(preferredPath, loadedDirs);
-      if (preferredKnown === "unknown") return;
+      if (preferredKnown === "unknown") {
+        expandDirs(parentDirsOf(preferredPath));
+        return;
+      }
       if (preferredKnown === "yes") {
+        expandDirs(parentDirsOf(preferredPath));
         if (activePath !== preferredPath) {
           setSelection((prev) => ({ ...prev, [source]: { path: preferredPath } }));
         }
@@ -227,18 +267,46 @@ export function ProjectFilesPanel({
 
     if (activePath) {
       const activeKnown = pathKnownInTree(activePath, loadedDirs);
-      if (activeKnown === "yes" || activeKnown === "unknown") return;
+      if (activeKnown === "yes") return;
+      if (activeKnown === "unknown") {
+        // Keep selection visible after source switch / loadedDirs reset without cascade expand.
+        expandDirs(parentDirsOf(activePath));
+        return;
+      }
     }
 
-    const firstFile = findFirstFileDFS(loadedDirs[""] ?? [], loadedDirs);
-    if (firstFile) {
-      setSelection((prev) => ({ ...prev, [source]: { path: firstFile } }));
+    const search = findFirstFileOrProbe(loadedDirs[""] ?? rootEntries, loadedDirs, failedDirs);
+    if (search.status === "probe") {
+      expandDirs([search.path]);
+      return;
+    }
+    if (search.status === "error") {
+      // Keep the failed dir expanded so its error row stays visible; do not skip as empty.
+      return;
+    }
+    if (search.status === "file") {
+      // Drop empty dirs probed during discovery; keep only the selected file's ancestors.
+      revealExpandedDirs(parentDirsOf(search.path));
+      if (activePath !== search.path) {
+        if (onPathChange) pendingPathChange.current = search.path;
+        setSelection((prev) => ({ ...prev, [source]: { path: search.path } }));
+        onPathChange?.(search.path);
+      } else if (!preferredPath && onPathChange) {
+        // Selection already matches first file but URL was never written (e.g. older sessions).
+        pendingPathChange.current = search.path;
+        onPathChange(search.path);
+      }
     }
   }, [
     activePath,
     emptyHead,
+    expandDirs,
+    failedDirs,
     loadedDirs,
+    onPathChange,
     preferredPath,
+    revealExpandedDirs,
+    rootEntries,
     rootQuery.isError,
     rootQuery.isLoading,
     source,
@@ -509,8 +577,8 @@ export function ProjectFilesPanel({
                     expanded={expanded}
                     activePath={activePath}
                     onToggleDir={toggleDir}
-                    onExpandDirs={expandDirs}
                     onEntriesLoaded={reportEntries}
+                    onDirLoadFailed={reportDirFailed}
                     onSelectFile={selectFile}
                     onEditFile={(path) => void openEditorForPath(path)}
                     onOpenContextMenu={setMenu}
@@ -608,23 +676,34 @@ export function ProjectFilesPanel({
   );
 }
 
-function dirPaths(entries: TreeEntry[]): string[] {
-  return entries.filter((entry) => entry.kind === "dir").map((entry) => entry.path);
-}
+type FirstFileSearch =
+  | { status: "file"; path: string }
+  | { status: "probe"; path: string }
+  | { status: "error"; path: string }
+  | { status: "none" };
 
-/** Depth-first first file: enter dirs before later siblings; wait if a dir is not loaded yet. */
-function findFirstFileDFS(entries: TreeEntry[], loaded: Record<string, TreeEntry[]>): string {
+/**
+ * Depth-first first file: enter dirs before later siblings.
+ * Returns the next unloaded directory to open (`probe`) when the walk needs it.
+ * Failed directory loads are not treated as empty (do not skip into later siblings).
+ */
+function findFirstFileOrProbe(
+  entries: TreeEntry[],
+  loaded: Record<string, TreeEntry[]>,
+  failed: Set<string>,
+): FirstFileSearch {
   for (const entry of entries) {
-    if (entry.kind === "file") return entry.path;
+    if (entry.kind === "file") return { status: "file", path: entry.path };
     if (entry.kind === "dir") {
+      if (failed.has(entry.path)) return { status: "error", path: entry.path };
       const children = loaded[entry.path];
       // Dir listed before sibling files must be fully walked first.
-      if (!children) return "";
-      const found = findFirstFileDFS(children, loaded);
-      if (found) return found;
+      if (!children) return { status: "probe", path: entry.path };
+      const found = findFirstFileOrProbe(children, loaded, failed);
+      if (found.status !== "none") return found;
     }
   }
-  return "";
+  return { status: "none" };
 }
 
 /** Whether `path` is known to exist as a file/symlink in the loaded tree. */
@@ -670,8 +749,8 @@ function TreeNode({
   expanded,
   activePath,
   onToggleDir,
-  onExpandDirs,
   onEntriesLoaded,
+  onDirLoadFailed,
   onSelectFile,
   onEditFile,
   onOpenContextMenu,
@@ -683,8 +762,8 @@ function TreeNode({
   expanded: Set<string>;
   activePath: string;
   onToggleDir: (path: string) => void;
-  onExpandDirs: (paths: string[]) => void;
   onEntriesLoaded: (dirPath: string, entries: TreeEntry[]) => void;
+  onDirLoadFailed: (dirPath: string) => void;
   onSelectFile: (path: string) => void | Promise<void>;
   onEditFile: (path: string) => void;
   onOpenContextMenu: (menu: ProjectFilesContextMenuState) => void;
@@ -693,7 +772,6 @@ function TreeNode({
   const isOpen = isDir && expanded.has(entry.path);
   const active = activePath === entry.path;
   const canEditFile = source === "worktree" && entry.kind === "file";
-
 
   const childQuery = useInfiniteQuery({
     queryKey: ["workspace-tree", projectID, source, entry.path],
@@ -713,15 +791,23 @@ function TreeNode({
 
   useEffect(() => {
     if (!isOpen) return;
-    onExpandDirs(dirPaths(childEntries));
-  }, [childEntries, isOpen, onExpandDirs]);
-
-  useEffect(() => {
-    if (!isOpen) return;
+    if (childQuery.isError) {
+      onDirLoadFailed(entry.path);
+      return;
+    }
     // Avoid treating "still loading" as an empty directory (would skip into later siblings).
     if (childQuery.isLoading && !childQuery.data) return;
     onEntriesLoaded(entry.path, childEntries);
-  }, [childEntries, childQuery.data, childQuery.isLoading, entry.path, isOpen, onEntriesLoaded]);
+  }, [
+    childEntries,
+    childQuery.data,
+    childQuery.isError,
+    childQuery.isLoading,
+    entry.path,
+    isOpen,
+    onDirLoadFailed,
+    onEntriesLoaded,
+  ]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -831,8 +917,8 @@ function TreeNode({
               expanded={expanded}
               activePath={activePath}
               onToggleDir={onToggleDir}
-              onExpandDirs={onExpandDirs}
               onEntriesLoaded={onEntriesLoaded}
+              onDirLoadFailed={onDirLoadFailed}
               onSelectFile={onSelectFile}
               onEditFile={onEditFile}
               onOpenContextMenu={onOpenContextMenu}
