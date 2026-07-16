@@ -113,7 +113,30 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			if s.deps.Watcher != nil {
 				_ = s.deps.Watcher.Watch(p.ID, p.Path)
 			}
-			writeJSON(w, http.StatusCreated, p)
+			resp := map[string]any{
+				"id":        p.ID,
+				"name":      p.Name,
+				"path":      p.Path,
+				"addedAt":   p.AddedAt,
+				"openedAt":  p.OpenedAt,
+				"exists":    p.Exists,
+				"summary":   p.Summary,
+				"remoteLinked": p.RemoteLinked,
+				"ahead":     p.Ahead,
+				"behind":    p.Behind,
+			}
+			if s.deps.Remotes != nil {
+				if st, linked, linkErr := s.deps.Remotes.TryAutoLink(r.Context(), p.ID); linked {
+					auto := map[string]any{"status": "linked", "remote": st}
+					if s.startBackgroundRemoteFetch(p.ID, p.Path) {
+						auto["fetchStarted"] = true
+					}
+					resp["autoLink"] = auto
+				} else if linkErr != nil {
+					resp["autoLink"] = map[string]any{"status": "failed", "message": safeOAuthMessage(linkErr)}
+				}
+			}
+			writeJSON(w, http.StatusCreated, resp)
 		})(w, r)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")

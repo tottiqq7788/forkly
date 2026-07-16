@@ -100,7 +100,7 @@ cp -R "$ROOT/third_party/git/"* "$APP/Contents/Resources/git/"
 export CGO_ENABLED=1
 export GOOS=darwin
 export GOARCH
-go build -ldflags "-X github.com/forkly-app/forkly/internal/app.Version=${VERSION} -X github.com/forkly-app/forkly/internal/github.ClientID=${FORKLY_GITHUB_CLIENT_ID:-}" \
+go build -ldflags "-X github.com/forkly-app/forkly/internal/app.Version=${VERSION} -X github.com/forkly-app/forkly/internal/github.ClientID=${FORKLY_GITHUB_CLIENT_ID:-} -X github.com/forkly-app/forkly/internal/github.ClientSecret=${FORKLY_GITHUB_CLIENT_SECRET:-}" \
   -o "$APP/Contents/MacOS/forkly" ./cmd/forkly
 go build -o "$APP/Contents/MacOS/forkly-askpass" ./cmd/forkly-askpass
 CGO_ENABLED=0 go build -ldflags "-X github.com/forkly-app/forkly/internal/cli.Version=${VERSION}" \

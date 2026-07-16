@@ -27,7 +27,7 @@ import (
 	"github.com/forkly-app/forkly/internal/watcher"
 )
 
-var Version = "0.1.49"
+var Version = "0.1.50"
 
 // LaunchPaths holds Markdown paths collected before the app is fully ready.
 type LaunchOptions struct {

@@ -39,7 +39,7 @@ Write-Host "== Build Forkly.exe =="
 $env:GOOS = "windows"
 $env:GOARCH = $goArch
 $env:CGO_ENABLED = "1"
-$ldflags = "-H windowsgui -X github.com/forkly-app/forkly/internal/app.Version=$Version -X github.com/forkly-app/forkly/internal/github.ClientID=$env:FORKLY_GITHUB_CLIENT_ID"
+$ldflags = "-H windowsgui -X github.com/forkly-app/forkly/internal/app.Version=$Version -X github.com/forkly-app/forkly/internal/github.ClientID=$env:FORKLY_GITHUB_CLIENT_ID -X github.com/forkly-app/forkly/internal/github.ClientSecret=$env:FORKLY_GITHUB_CLIENT_SECRET"
 go build -ldflags $ldflags -o (Join-Path $appDir "Forkly.exe") .\cmd\forkly
 go build -o (Join-Path $appDir "forkly-askpass.exe") .\cmd\forkly-askpass
 $ctlLdflags = "-X github.com/forkly-app/forkly/internal/cli.Version=$Version"

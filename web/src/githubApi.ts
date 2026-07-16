@@ -109,8 +109,22 @@ export type ListedRepo = {
 export function fetchGitHubSettings() {
   return api<{
     oauthConfigured: boolean;
+    webOAuthConfigured?: boolean;
+    deviceFlowConfigured?: boolean;
     account: GitHubAccount | null;
   }>("/local-api/v1/settings/github");
+}
+
+export type WebOAuthStart = {
+  authorizationUrl: string;
+  state: string;
+};
+
+export function startGitHubWebOAuth(body: { projectId?: string; returnTo?: string }) {
+  return api<WebOAuthStart>("/local-api/v1/github/oauth/start", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function logoutGitHub() {
@@ -145,7 +159,7 @@ export function fetchRemoteStatus(projectID: string) {
 
 export function linkRemote(
   projectID: string,
-  body: { url?: string; remoteName?: string; replace?: boolean; useExisting?: boolean },
+  body: { url?: string; remoteName?: string; replace?: boolean; useExisting?: boolean; strictAccess?: boolean },
 ) {
   return api<RemoteStatus>(`/local-api/v1/projects/${projectID}/remote`, {
     method: "PUT",

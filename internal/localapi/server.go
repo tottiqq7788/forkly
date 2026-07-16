@@ -108,6 +108,8 @@ func (s *Server) StartWith(opts StartOptions) (string, error) {
 	mux.HandleFunc("/local-api/v1/github/device/start", s.authWrite(s.handleGitHubDeviceStart))
 	mux.HandleFunc("/local-api/v1/github/device/status", s.auth(s.handleGitHubDeviceStatus))
 	mux.HandleFunc("/local-api/v1/github/device/cancel", s.authWrite(s.handleGitHubDeviceCancel))
+	mux.HandleFunc("/local-api/v1/github/oauth/start", s.authWrite(s.handleGitHubOAuthStart))
+	mux.HandleFunc("/local-api/v1/github/oauth/callback", s.handleGitHubOAuthCallback)
 	mux.HandleFunc("/local-api/v1/github/pat", s.authWrite(s.handleGitHubPAT))
 	mux.HandleFunc("/local-api/v1/github/repos", s.auth(s.handleGitHubRepos))
 	mux.HandleFunc("/local-api/v1/projects/clone", s.authWrite(s.handleProjectClone))

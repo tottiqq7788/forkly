@@ -46,10 +46,11 @@ type DetectedRemote struct {
 }
 
 type LinkRemoteRequest struct {
-	URL          string `json:"url"`
-	RemoteName   string `json:"remoteName"`
-	Replace      bool   `json:"replace"`
-	UseExisting  bool   `json:"useExisting"`
+	URL           string `json:"url"`
+	RemoteName    string `json:"remoteName"`
+	Replace       bool   `json:"replace"`
+	UseExisting   bool   `json:"useExisting"`
+	StrictAccess  bool   `json:"strictAccess"`
 }
 
 type UnlinkRemoteRequest struct {
@@ -210,6 +211,9 @@ func (rs *RemoteService) Link(ctx context.Context, projectID string, req LinkRem
 
 	// Verify API access when possible.
 	if _, err := rs.GitHub.GetRepo(ctx, accountID, ref.Owner, ref.Repo); err != nil {
+		if req.StrictAccess || strictRepoAccessFailure(err) {
+			return RemoteStatusView{}, err
+		}
 		var apiErr *gh.APIError
 		if gh.AsAPIError(err, &apiErr) && (apiErr.Code == gh.CodeAuthRequired || apiErr.Code == gh.CodeInvalidToken || apiErr.Code == gh.CodeTokenExpired) {
 			return RemoteStatusView{}, err
@@ -237,6 +241,56 @@ func (rs *RemoteService) Link(ctx context.Context, projectID string, req LinkRem
 		return RemoteStatusView{}, err
 	}
 	return rs.Status(ctx, projectID)
+}
+
+func strictRepoAccessFailure(err error) bool {
+	var apiErr *gh.APIError
+	if !gh.AsAPIError(err, &apiErr) {
+		return err != nil
+	}
+	switch apiErr.Code {
+	case gh.CodePermissionDenied, gh.CodeRepositoryNotFound, gh.CodeSSO, gh.CodeOffline, gh.CodeTimeout, gh.CodeRateLimited:
+		return true
+	default:
+		return false
+	}
+}
+
+// LinkExistingStrict associates an existing GitHub HTTPS origin after verifying repository access.
+func (rs *RemoteService) LinkExistingStrict(ctx context.Context, projectID string) (RemoteStatusView, error) {
+	return rs.Link(ctx, projectID, LinkRemoteRequest{
+		RemoteName:   "origin",
+		UseExisting:  true,
+		StrictAccess: true,
+	})
+}
+
+// TryAutoLink links a freshly added project when a unique GitHub HTTPS origin is accessible.
+func (rs *RemoteService) TryAutoLink(ctx context.Context, projectID string) (RemoteStatusView, bool, error) {
+	p, err := rs.Projects.Get(projectID)
+	if err != nil {
+		return RemoteStatusView{}, false, err
+	}
+	if p.Remote != nil {
+		return RemoteStatusView{}, false, nil
+	}
+	snap := rs.Store.Snapshot()
+	if snap.GitHubAccount == nil {
+		return RemoteStatusView{}, false, nil
+	}
+	sync, err := rs.Git.RemoteSyncStatus(ctx, p.Path, "origin")
+	if err != nil {
+		return RemoteStatusView{}, false, err
+	}
+	detected := detectOrigin(sync.Remotes)
+	if detected == nil || !detected.IsGitHub || detected.Owner == "" || detected.Repo == "" {
+		return RemoteStatusView{}, false, nil
+	}
+	st, err := rs.LinkExistingStrict(ctx, projectID)
+	if err != nil {
+		return RemoteStatusView{}, false, err
+	}
+	return st, true, nil
 }
 
 type ConflictError struct {

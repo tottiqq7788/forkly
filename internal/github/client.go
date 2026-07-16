@@ -66,8 +66,10 @@ type Client struct {
 	ClientID  string
 	Creds     credentials.Store
 
-	mu    sync.Mutex
-	flows map[string]*deviceFlow
+	mu       sync.Mutex
+	flows    map[string]*deviceFlow
+	webFlows map[string]*webOAuthFlow
+	ClientSecret string
 }
 
 type deviceFlow struct {
@@ -123,19 +125,21 @@ func NewClient(creds credentials.Store) *Client {
 		HTTP:      &http.Client{Timeout: 30 * time.Second},
 		APIBase:   defaultAPIBase,
 		LoginBase: defaultLoginBase,
-		ClientID:  ClientID,
-		Creds:     creds,
-		flows:     map[string]*deviceFlow{},
+		ClientID:     ClientID,
+		ClientSecret: ClientSecret,
+		Creds:        creds,
+		flows:        map[string]*deviceFlow{},
+		webFlows:     map[string]*webOAuthFlow{},
 	}
 }
 
 func (c *Client) OAuthConfigured() bool {
-	return strings.TrimSpace(c.ClientID) != ""
+	return c.DeviceFlowConfigured() || c.WebOAuthConfigured()
 }
 
 // StartDeviceFlow begins GitHub device authorization. Frontend never sees device_code.
 func (c *Client) StartDeviceFlow(ctx context.Context) (DeviceStartResult, error) {
-	if !c.OAuthConfigured() {
+	if !c.DeviceFlowConfigured() {
 		return DeviceStartResult{}, &APIError{Code: CodeConfigMissing, Message: "未配置 GitHub App Client ID，请改用个人访问令牌"}
 	}
 	form := url.Values{}
@@ -154,7 +158,7 @@ func (c *Client) StartDeviceFlow(ctx context.Context) (DeviceStartResult, error)
 		return DeviceStartResult{}, mapTransport(err)
 	}
 	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	body, _ := readLimited(res.Body, 1<<20)
 	if res.StatusCode >= 400 {
 		return DeviceStartResult{}, mapHTTP(res.StatusCode, body)
 	}
@@ -352,7 +356,7 @@ func (c *Client) requestDeviceToken(ctx context.Context, deviceCode string) (tok
 		return tokenResponse{}, mapTransport(err)
 	}
 	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	body, _ := readLimited(res.Body, 1<<20)
 	var parsed tokenResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return tokenResponse{}, fmt.Errorf("解析令牌响应失败")
@@ -435,7 +439,7 @@ func (c *Client) GetUser(ctx context.Context, token string) (User, error) {
 		return User{}, mapTransport(err)
 	}
 	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	body, _ := readLimited(res.Body, 1<<20)
 	if res.StatusCode >= 400 {
 		return User{}, mapHTTP(res.StatusCode, body)
 	}
@@ -458,7 +462,7 @@ func (c *Client) GetToken(accountID string) (credentials.Secret, error) {
 		return credentials.Secret{}, err
 	}
 	if secret.Expired(time.Now()) {
-		if secret.RefreshToken != "" && c.OAuthConfigured() {
+		if secret.RefreshToken != "" && c.WebOAuthConfigured() {
 			refreshed, rerr := c.refreshToken(context.Background(), secret.RefreshToken)
 			if rerr == nil {
 				secret.Token = refreshed.AccessToken
@@ -480,6 +484,9 @@ func (c *Client) GetToken(accountID string) (credentials.Secret, error) {
 func (c *Client) refreshToken(ctx context.Context, refreshToken string) (tokenResponse, error) {
 	form := url.Values{}
 	form.Set("client_id", c.ClientID)
+	if secret := c.clientSecret(); secret != "" {
+		form.Set("client_secret", secret)
+	}
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.LoginBase+"/login/oauth/access_token", strings.NewReader(form.Encode()))
@@ -494,7 +501,7 @@ func (c *Client) refreshToken(ctx context.Context, refreshToken string) (tokenRe
 		return tokenResponse{}, mapTransport(err)
 	}
 	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	body, _ := readLimited(res.Body, 1<<20)
 	var parsed tokenResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return tokenResponse{}, fmt.Errorf("刷新令牌失败")
@@ -765,4 +772,8 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func readLimited(r io.Reader, limit int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, limit))
 }

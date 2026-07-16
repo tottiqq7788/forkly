@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowClockwise, CloudArrowDown, CloudArrowUp, GithubLogo } from "@phosphor-icons/react";
 import {
   createGitHubRepo,
+  fetchGitHubSettings,
   fetchOperation,
   fetchRemoteStatus,
   linkRemote,
@@ -27,15 +29,34 @@ async function invalidateSync(qc: ReturnType<typeof useQueryClient>, projectID: 
     qc.invalidateQueries({ queryKey: ["branches", projectID] }),
     qc.invalidateQueries({ queryKey: ["projects"] }),
     qc.invalidateQueries({ queryKey: ["workspace-tree", projectID] }),
+    qc.invalidateQueries({ queryKey: ["github-settings"] }),
   ]);
+}
+
+function readOAuthReturn(search: string) {
+  const params = new URLSearchParams(search);
+  const oauth = params.get("gh_oauth");
+  if (!oauth) return null;
+  return {
+    oauth,
+    link: params.get("gh_link") || "",
+    message: params.get("gh_msg") || "",
+    fetch: params.get("gh_fetch") === "1",
+  };
 }
 
 export function GitHubRemotePanel({ projectID, projectName, projectMissing, onErr }: Props) {
   const qc = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const remote = useQuery({
     queryKey: ["remote", projectID],
     queryFn: () => fetchRemoteStatus(projectID),
     refetchInterval: (q) => (q.state.data?.activeOp ? 1000 : false),
+  });
+  const githubSettings = useQuery({
+    queryKey: ["github-settings"],
+    queryFn: fetchGitHubSettings,
   });
   const [url, setUrl] = useState("");
   const [replaceRemote, setReplaceRemote] = useState(false);
@@ -47,6 +68,36 @@ export function GitHubRemotePanel({ projectID, projectName, projectMissing, onEr
   const [createDesc, setCreateDesc] = useState("");
   const [opId, setOpId] = useState("");
   const [busyKind, setBusyKind] = useState("");
+  const [oauthBanner, setOauthBanner] = useState("");
+
+  const oauthReturn = useMemo(() => readOAuthReturn(location.search), [location.search]);
+
+  useEffect(() => {
+    if (!oauthReturn) return;
+    const params = new URLSearchParams(location.search);
+    params.delete("gh_oauth");
+    params.delete("gh_link");
+    params.delete("gh_msg");
+    params.delete("gh_fetch");
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "" }, { replace: true });
+
+    void invalidateSync(qc, projectID);
+    if (oauthReturn.oauth === "ok") {
+      if (oauthReturn.link === "linked") {
+        setOauthBanner(oauthReturn.fetch ? "GitHub 已连接并关联，正在获取远端更新…" : "GitHub 已连接并关联本项目。");
+        onErr("");
+      } else if (oauthReturn.link === "failed") {
+        setOauthBanner("");
+        onErr(oauthReturn.message || "授权成功，但自动关联远端失败，请手动关联。");
+      } else {
+        setOauthBanner("GitHub 账号已连接。");
+        onErr("");
+      }
+    } else {
+      onErr(oauthReturn.message || "GitHub 授权未完成");
+    }
+  }, [oauthReturn, location.pathname, location.search, navigate, onErr, projectID, qc]);
 
   const op = useQuery({
     queryKey: ["operation", opId],
@@ -69,7 +120,7 @@ export function GitHubRemotePanel({ projectID, projectName, projectMissing, onEr
   }, [op.data?.status, op.data?.error, onErr, qc, projectID]);
 
   const link = useMutation({
-    mutationFn: (body: { url?: string; useExisting?: boolean; replace?: boolean }) =>
+    mutationFn: (body: { url?: string; useExisting?: boolean; replace?: boolean; strictAccess?: boolean }) =>
       linkRemote(projectID, { remoteName: "origin", ...body }),
     onSuccess: async () => {
       onErr("");
@@ -131,6 +182,14 @@ export function GitHubRemotePanel({ projectID, projectName, projectMissing, onEr
 
   const data = remote.data;
   const busy = !!busyKind || link.isPending || unlink.isPending || createRepo.isPending;
+  const webOAuthConfigured = githubSettings.data?.webOAuthConfigured ?? false;
+  const detected = data?.detectedOrigin;
+  const canOneClick =
+    !data?.authConfigured &&
+    detected?.isGithub &&
+    detected.owner &&
+    detected.repo &&
+    webOAuthConfigured;
 
   if (remote.isLoading) {
     return <p className="text-sm text-[var(--color-text-secondary)]">加载 GitHub 状态…</p>;
@@ -142,8 +201,32 @@ export function GitHubRemotePanel({ projectID, projectName, projectMissing, onEr
         <div className="flex items-center gap-2 text-sm font-medium">
           <GithubLogo size={16} /> GitHub
         </div>
-        <p className="text-xs text-[var(--color-text-secondary)]">先连接 GitHub 账号，再关联本项目仓库。</p>
-        <GitHubAccountPanel />
+        {canOneClick ? (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3 space-y-2">
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              检测到现有远端{" "}
+              <span className="font-medium">
+                {detected.owner}/{detected.repo}
+              </span>
+              。点击下方按钮将在浏览器完成授权，并自动关联此仓库。
+            </p>
+            <GitHubAccountPanel
+              projectId={projectID}
+              returnTo={`/projects/${projectID}?drawer=settings`}
+              compact
+            />
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-[var(--color-text-secondary)]">先连接 GitHub 账号，再关联本项目仓库。</p>
+            {detected?.isGithub && (
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                已检测到 {detected.owner}/{detected.repo}，连接账号后可一键关联。
+              </p>
+            )}
+            <GitHubAccountPanel projectId={projectID} returnTo={`/projects/${projectID}?drawer=settings`} />
+          </>
+        )}
       </div>
     );
   }
@@ -164,6 +247,12 @@ export function GitHubRemotePanel({ projectID, projectName, projectMissing, onEr
           <ArrowClockwise size={14} className={remote.isFetching ? "animate-spin" : undefined} />
         </button>
       </div>
+
+      {oauthBanner && (
+        <p className="text-xs text-[var(--color-accent)] bg-[var(--color-canvas-subtle)] rounded-[var(--radius-sm)] p-2">
+          {oauthBanner}
+        </p>
+      )}
 
       {data.connected ? (
         <>
@@ -273,7 +362,7 @@ export function GitHubRemotePanel({ projectID, projectName, projectMissing, onEr
               <button
                 type="button"
                 disabled={busy || projectMissing}
-                onClick={() => link.mutate({ useExisting: true })}
+                onClick={() => link.mutate({ useExisting: true, strictAccess: true })}
                 className="rounded-[var(--radius-sm)] bg-[var(--color-accent)] text-[var(--color-canvas)] px-2 py-1 text-xs disabled:opacity-50"
               >
                 使用现有远端

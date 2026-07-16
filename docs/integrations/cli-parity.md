@@ -79,7 +79,9 @@
 |------|-----------|-----|-----|------|
 | 查看已连接账号 | `GET /settings/github` | 设置页 | `github account` | `cli_supported` |
 | 搜索可关联仓库 | `GET /github/repos` | 关联向导 | `github repos [--q Q]` | `cli_supported` |
-| Device Flow 登录 | `POST /github/device/*` | 浏览器授权 | `github device start\|status\|cancel` | `gui_adapted` |
+| Web OAuth 登录 | `POST /github/oauth/start` | 项目设置一键连接 | — | `gui_only` |
+| OAuth 回调 | `GET /github/oauth/callback` | GitHub 重定向 | — | `gui_only` |
+| Device Flow 登录 | `POST /github/device/*` | 降级授权 | `github device start\|status\|cancel` | `gui_adapted` |
 | PAT 登录 | `POST /github/pat` | 设置粘贴 | `github pat`（stdin） | `gui_adapted` |
 | 退出 GitHub | `DELETE /settings/github` | 确认 | `github logout --yes` | `gui_adapted` |
 

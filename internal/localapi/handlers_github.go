@@ -15,8 +15,10 @@ func (s *Server) handleGitHubSettings(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		snap := s.deps.Store.Snapshot()
 		out := map[string]any{
-			"oauthConfigured": s.deps.GitHub != nil && s.deps.GitHub.OAuthConfigured(),
-			"account":         nil,
+			"oauthConfigured":       s.deps.GitHub != nil && s.deps.GitHub.OAuthConfigured(),
+			"webOAuthConfigured":    s.deps.GitHub != nil && s.deps.GitHub.WebOAuthConfigured(),
+			"deviceFlowConfigured":  s.deps.GitHub != nil && s.deps.GitHub.DeviceFlowConfigured(),
+			"account":               nil,
 		}
 		if snap.GitHubAccount != nil {
 			out["account"] = snap.GitHubAccount
